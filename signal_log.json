@@ -317,7 +317,7 @@
     "tp1": 4124.25065,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "win"
   },
   {
     "time_iso": "2026-07-02T23:30:41.261959+00:00",
@@ -327,6 +327,6 @@
     "tp1": 4126.41522,
     "score": 5,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "win"
   }
 ]
