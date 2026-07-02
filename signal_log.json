@@ -187,7 +187,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:35:23.550706+00:00",
@@ -197,7 +197,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:40:33.997734+00:00",
@@ -207,7 +207,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:45:28.095105+00:00",
@@ -217,7 +217,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:50:36.395613+00:00",
@@ -227,7 +227,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:55:27.332747+00:00",
@@ -237,7 +237,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T22:00:42.876254+00:00",
@@ -247,7 +247,7 @@
     "tp1": 4118.64685,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T22:05:26.998254+00:00",
@@ -256,6 +256,16 @@
     "sl": 4127.602472175969,
     "tp1": 4119.393464999999,
     "score": 5,
+    "mode": "mean_reversion",
+    "status": "pending"
+  },
+  {
+    "time_iso": "2026-07-02T22:10:40.489736+00:00",
+    "direction": "SELL",
+    "entry": 4126.43402,
+    "sl": 4127.7350352191725,
+    "tp1": 4119.6865099999995,
+    "score": 4,
     "mode": "mean_reversion",
     "status": "pending"
   }
