@@ -28,5 +28,15 @@
     "score": 5,
     "mode": "trend",
     "status": "loss"
+  },
+  {
+    "time_iso": "2026-07-02T19:25:22.952965+00:00",
+    "direction": "BUY",
+    "entry": 4109.70359,
+    "sl": 4103.482967174639,
+    "tp1": 4115.63977,
+    "score": 2,
+    "mode": "mean_reversion",
+    "status": "pending"
   }
 ]
