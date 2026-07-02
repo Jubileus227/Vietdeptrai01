@@ -7,6 +7,16 @@
     "tp1": 4124.445118900025,
     "score": 6,
     "mode": "trend",
+    "status": "win"
+  },
+  {
+    "time_iso": "2026-07-02T18:35:27.834942+00:00",
+    "direction": "BUY",
+    "entry": 4125.86326,
+    "sl": 4118.791281809989,
+    "tp1": 4140.007216380021,
+    "score": 6,
+    "mode": "trend",
     "status": "pending"
   }
 ]
