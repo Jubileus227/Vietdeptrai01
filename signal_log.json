@@ -147,7 +147,7 @@
     "tp1": 4116.83596,
     "score": 4,
     "mode": "mean_reversion",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-02T21:15:27.288627+00:00",
@@ -305,6 +305,16 @@
     "entry": 4126.56133,
     "sl": 4128.82389775027,
     "tp1": 4123.54604,
+    "score": 4,
+    "mode": "mean_reversion",
+    "status": "pending"
+  },
+  {
+    "time_iso": "2026-07-02T23:25:24.467115+00:00",
+    "direction": "SELL",
+    "entry": 4127.11107,
+    "sl": 4130.049015465758,
+    "tp1": 4124.25065,
     "score": 4,
     "mode": "mean_reversion",
     "status": "pending"
