@@ -585,6 +585,62 @@ def check_entry_chase(direction, current_price, ob, atr_value, max_atr_distance=
     return None
 
 
+def build_watch_zones(current_price, ob, sr, fib, atr_value):
+    """
+    Liệt kê các vùng giá đáng chú ý để đặt lệnh CHỜ (Buy Limit/Sell Limit) -
+    hiển thị LUÔN kể cả khi chưa đủ điều kiện ra tín hiệu chính thức.
+    Đây là thông tin tham khảo (bản đồ vùng giá), KHÔNG phải khuyến nghị vào lệnh ngay -
+    không cộng/trừ vào hệ thống chấm điểm, không ảnh hưởng đến logic tín hiệu chính.
+    """
+    zones = []
+
+    # --- Order Block: giá pullback về biên gần của OB thường là điểm entry đẹp ---
+    if ob:
+        zone_low, zone_high = ob["zone"]
+        if ob["type"] == "bullish" and current_price > zone_high:
+            zones.append({
+                "label": "Order Block (Bullish)", "order_type": "Buy Limit",
+                "price": zone_high, "distance_atr": round((current_price - zone_high) / atr_value, 1),
+            })
+        elif ob["type"] == "bearish" and current_price < zone_low:
+            zones.append({
+                "label": "Order Block (Bearish)", "order_type": "Sell Limit",
+                "price": zone_low, "distance_atr": round((zone_low - current_price) / atr_value, 1),
+            })
+
+    # --- Hỗ trợ/Kháng cự: vùng giá cổ điển để đặt lệnh chờ hồi ---
+    if sr:
+        if current_price > sr["support"]:
+            zones.append({
+                "label": "Hỗ trợ gần nhất", "order_type": "Buy Limit",
+                "price": sr["support"], "distance_atr": round((current_price - sr["support"]) / atr_value, 1),
+            })
+        if current_price < sr["resistance"]:
+            zones.append({
+                "label": "Kháng cự gần nhất", "order_type": "Sell Limit",
+                "price": sr["resistance"], "distance_atr": round((sr["resistance"] - current_price) / atr_value, 1),
+            })
+
+    # --- Fibonacci 61.8%: vùng thường được nhiều trader/tổ chức chú ý ---
+    if fib:
+        fib_618 = fib["levels"]["61.8"]
+        if fib["uptrend_leg"] and current_price > fib_618:
+            zones.append({
+                "label": "Fib 61.8% (retracement)", "order_type": "Buy Limit",
+                "price": fib_618, "distance_atr": round((current_price - fib_618) / atr_value, 1),
+            })
+        elif not fib["uptrend_leg"] and current_price < fib_618:
+            zones.append({
+                "label": "Fib 61.8% (retracement)", "order_type": "Sell Limit",
+                "price": fib_618, "distance_atr": round((fib_618 - current_price) / atr_value, 1),
+            })
+
+    # Chỉ giữ lại vùng đủ xa để có ý nghĩa (>=0.3 ATR), sắp theo khoảng cách gần -> xa
+    zones = [z for z in zones if z["distance_atr"] >= 0.3]
+    zones.sort(key=lambda z: z["distance_atr"])
+    return zones[:4]  # tối đa 4 vùng, tránh tin nhắn quá dài
+
+
 # ============================================================
 # 3. LOGIC TẠO TÍN HIỆU
 # ============================================================
@@ -741,6 +797,7 @@ def generate_signal():
         "signal_mode": signal_mode,
         "entry_type": "market",
         "chase_warning": None,
+        "watch_zones": build_watch_zones(current_price, ob, sr, fib, atr_m5),
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -870,6 +927,13 @@ def format_message(sig, win_stats=None):
     else:
         lines.append("")
         lines.append("⚪ Chưa đủ tín hiệu rõ ràng để vào lệnh lúc này")
+
+    if not sig["direction"] and sig.get("watch_zones"):
+        lines.append("")
+        lines.append("📋 Vùng theo dõi (tham khảo đặt lệnh chờ, KHÔNG phải khuyến nghị vào ngay):")
+        for z in sig["watch_zones"]:
+            lines.append(f"   • {z['label']}: {z['order_type']} @ {z['price']:.2f} "
+                          f"(cách {z['distance_atr']}x ATR)")
 
     if win_stats:
         lines.append("─────────────────────")
