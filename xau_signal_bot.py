@@ -622,20 +622,24 @@ def append_signal(log, sig):
         "tp1": sig["tp1"],
         "score": sig["score"],
         "mode": sig.get("signal_mode", "trend"),  # "trend" hoặc "mean_reversion" - để đánh giá riêng từng loại
+        "confidence": sig.get("confidence", "normal"),  # "normal" hoặc "low" - để so sánh 2 mức tin cậy
         "entry_type": entry_type,
         "status": initial_status,
     })
     return log
 
 
-def compute_win_rate(log, mode=None):
+def compute_win_rate(log, mode=None, confidence=None):
     """
     Tính tỷ lệ thắng/thua. Nếu truyền mode ("trend" hoặc "mean_reversion"),
-    chỉ tính riêng loại đó -> cho phép đánh giá độc lập 2 chiến lược khác nhau.
-    Các bản ghi log cũ (trước khi có trường 'mode') được coi là 'trend' để không mất dữ liệu.
+    chỉ tính riêng loại đó. Nếu truyền confidence ("normal" hoặc "low"), lọc thêm theo
+    độ tin cậy -> cho phép so sánh tín hiệu 🟡 THẤP có thực sự kém hơn 🟢 bình thường không.
+    Bản ghi log cũ (trước khi có trường 'mode'/'confidence') coi là 'trend'/'normal' để không mất dữ liệu.
     """
     if mode:
         log = [r for r in log if r.get("mode", "trend") == mode]
+    if confidence:
+        log = [r for r in log if r.get("confidence", "normal") == confidence]
     closed = [r for r in log if r.get("status") in ("win", "loss")]
     wins = [r for r in closed if r["status"] == "win"]
     if not closed:
@@ -890,6 +894,8 @@ def generate_signal():
     direction = None
     block_reason = None
     signal_mode = "trend"
+    confidence = "normal"   # "normal" hoặc "low" - độ tin cậy của tín hiệu
+    confidence_notes = []   # lý do hạ độ tin cậy, hiển thị rõ cho người dùng tự cân nhắc
 
     if score >= SIGNAL_THRESHOLD:
         direction = "BUY"
@@ -897,27 +903,32 @@ def generate_signal():
         direction = "SELL"
 
     is_sideway = adx_m15 < ADX_MIN
+    trend_direction = direction  # giữ lại hướng gốc theo điểm số, dùng lại nếu hạ độ tin cậy thay vì chặn hẳn
 
-    # --- Các bộ lọc chặn tín hiệu trend nếu điều kiện thị trường không thuận lợi ---
-    if direction:
-        if is_sideway:
-            direction = None  # tín hiệu trend không đáng tin khi sideway, xử lý riêng bên dưới
-        elif news_warning:
-            direction = None
-            block_reason = f"Sắp có tin quan trọng: {news_warning} -> tạm ẩn khuyến nghị để tránh SL bị quét"
-
-    # --- Nếu đang sideway: thử chiến lược mean-reversion riêng (khác hẳn trend-following) ---
+    # --- Nếu đang sideway: ưu tiên thử mean-reversion trước (chiến lược phù hợp hơn cho sideway) ---
     mr = None
-    if is_sideway and not news_warning:
+    if is_sideway:
         mr = mean_reversion_signal(current_price, sr, rsi_m5, atr_m5)
-        if mr:
-            direction = mr["direction"]
-            signal_mode = "mean_reversion"
-        else:
-            block_reason = (f"ADX(M15)={adx_m15:.1f} < {ADX_MIN} -> thị trường đi ngang, "
-                             f"và giá chưa ở vùng biên range đủ rõ để đánh mean-reversion")
-    elif is_sideway and news_warning:
-        block_reason = f"Sắp có tin quan trọng: {news_warning} -> tạm ẩn mọi khuyến nghị"
+
+    if is_sideway and mr:
+        direction = mr["direction"]
+        signal_mode = "mean_reversion"
+    elif is_sideway and trend_direction:
+        # Không có setup mean-reversion rõ ràng, nhưng điểm trend vẫn đủ ngưỡng.
+        # KẾT HỢP: vẫn đưa lệnh (không chặn hẳn) nhưng hạ xuống "độ tin cậy THẤP" + ghi rõ lý do,
+        # để người dùng tự quyết định thay vì bot tự ý im lặng.
+        direction = trend_direction
+        signal_mode = "trend"
+        confidence = "low"
+        confidence_notes.append(f"ADX(M15)={adx_m15:.1f} < {ADX_MIN} (thị trường đi ngang, tín hiệu trend kém tin cậy hơn)")
+    elif is_sideway:
+        direction = None
+        block_reason = "Thị trường đi ngang (ADX thấp) và điểm số cũng chưa đủ ngưỡng"
+
+    if direction and news_warning:
+        # KẾT HỢP: không còn chặn hẳn khi sắp có tin - vẫn đưa lệnh nhưng cảnh báo rõ rủi ro
+        confidence = "low"
+        confidence_notes.append(f"Sắp có tin quan trọng: {news_warning} (rủi ro SL bị gap qua khi tin ra)")
 
     liquidity_note = None
     if not session_ok:
@@ -1001,6 +1012,8 @@ def generate_signal():
         "chase_warning": None,
         "zones_above": zones_above,
         "zones_below": zones_below,
+        "confidence": confidence,
+        "confidence_notes": confidence_notes,
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -1055,7 +1068,10 @@ def format_message(sig, win_stats=None, active_trades=None):
       vùng theo dõi. Bỏ hết phần liệt kê chỉ báo chi tiết vì không có gì để hành động lúc đó.
     """
     trend_icon = lambda t: "⬆️" if t == "up" else "⬇️"
-    icon = "🟢" if sig["direction"] == "BUY" else ("🔴" if sig["direction"] == "SELL" else "⚪")
+    if sig.get("confidence") == "low" and sig["direction"]:
+        icon = "🟡"  # vàng = tín hiệu có nhưng độ tin cậy thấp, khác với xanh/đỏ bình thường
+    else:
+        icon = "🟢" if sig["direction"] == "BUY" else ("🔴" if sig["direction"] == "SELL" else "⚪")
 
     lines = []
     price_line = f"⚡ XAU/USD {sig['price']:.2f}"
@@ -1092,10 +1108,14 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"✨ {sig['fib_note']}")
         if sig["liquidity_note"]:
             lines.append(f"⚠️ Thanh khoản thấp (ngoài phiên chính)")
-        if sig["news_warning"]:
-            lines.append(f"📰 Sắp có tin: {sig['news_warning']}")
 
         lines.append(f"🧠 {sig['overview']}")
+
+        if sig.get("confidence") == "low":
+            lines.append("🚨 ĐỘ TIN CẬY: THẤP — cân nhắc kỹ trước khi vào:")
+            for note in sig.get("confidence_notes", []):
+                lines.append(f"   • {note}")
+
         lines.append("─────────────────────")
 
         if sig.get("signal_mode") == "mean_reversion":
@@ -1134,12 +1154,14 @@ def format_message(sig, win_stats=None, active_trades=None):
         if sig.get("zones_below"):
             lines.append("   🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
 
-    # ---------- Thống kê thắng/thua: luôn 1 dòng gọn ----------
+    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn ----------
     if win_stats:
-        t, m = win_stats.get("trend"), win_stats.get("mean_reversion")
-        t_txt = f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)" if t else "chưa đủ dữ liệu"
-        m_txt = f"{m['wins']}W/{m['losses']}L ({m['win_rate']}%)" if m else "chưa đủ dữ liệu"
-        lines.append(f"🎯 Trend: {t_txt}  |  MR: {m_txt}")
+        def _stat_txt(s):
+            return f"{s['wins']}W/{s['losses']}L ({s['win_rate']}%)" if s else "chưa đủ dữ liệu"
+
+        lines.append(f"🎯 🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
+        lines.append(f"   🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
+        lines.append(f"   🔁 Mean-Reversion: {_stat_txt(win_stats.get('mean_reversion'))}")
 
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
 
@@ -1173,7 +1195,8 @@ if __name__ == "__main__":
     log = append_signal(log, signal)
     save_signal_log(log)
     win_stats = {
-        "trend": compute_win_rate(log, mode="trend"),
+        "trend_normal": compute_win_rate(log, mode="trend", confidence="normal"),
+        "trend_low": compute_win_rate(log, mode="trend", confidence="low"),
         "mean_reversion": compute_win_rate(log, mode="mean_reversion"),
     }
 
