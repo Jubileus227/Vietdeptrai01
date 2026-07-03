@@ -338,6 +338,56 @@ def atr(df, period=14):
     return tr.ewm(span=period, adjust=False).mean()
 
 
+def macd(series, fast=12, slow=26, signal=9):
+    """
+    MACD — đo MOMENTUM (tốc độ/gia tốc chuyển động giá), khác với trend (chỉ đo hướng)
+    và khác RSI (đo vùng quá mua/quá bán). Trả về (đường MACD, đường Signal, Histogram).
+    Histogram dương và đang phình to = momentum tăng đang mạnh lên.
+    Histogram âm và đang phình to (về độ lớn) = momentum giảm đang mạnh lên.
+    """
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def detect_divergence(df, indicator_series, lookback=40, left=2, right=2):
+    """
+    Phát hiện PHÂN KỲ (divergence) giữa giá và 1 chỉ báo momentum (thường dùng MACD histogram):
+    - "bearish": giá tạo ĐỈNH CAO HƠN nhưng chỉ báo tạo đỉnh THẤP HƠN -> đà tăng có dấu hiệu
+      cạn kiệt, cảnh báo sớm khả năng đảo chiều xuống dù giá vẫn đang "thắng".
+    - "bullish": giá tạo ĐÁY THẤP HƠN nhưng chỉ báo tạo đáy CAO HƠN -> đà giảm cạn kiệt,
+      cảnh báo sớm khả năng đảo chiều lên.
+    Đây là 1 trong những tín hiệu cảnh báo sớm đáng tin cậy nhất trong phân tích kỹ thuật.
+    """
+    recent = df.iloc[-lookback:].reset_index(drop=True)
+    ind = indicator_series.iloc[-lookback:].reset_index(drop=True)
+    n = len(recent)
+    if n < left + right + 10:
+        return None
+
+    swing_highs, swing_lows = [], []
+    for i in range(left, n - right):
+        window_high = recent["high"].iloc[i - left:i + right + 1]
+        window_low = recent["low"].iloc[i - left:i + right + 1]
+        if recent["high"].iloc[i] == window_high.max():
+            swing_highs.append((recent["high"].iloc[i], ind.iloc[i]))
+        if recent["low"].iloc[i] == window_low.min():
+            swing_lows.append((recent["low"].iloc[i], ind.iloc[i]))
+
+    if len(swing_highs) >= 2:
+        (p1, i1), (p2, i2) = swing_highs[-2], swing_highs[-1]
+        if p2 > p1 and i2 < i1:
+            return "bearish"
+    if len(swing_lows) >= 2:
+        (p1, i1), (p2, i2) = swing_lows[-2], swing_lows[-1]
+        if p2 < p1 and i2 > i1:
+            return "bullish"
+    return None
+
+
 def support_resistance(df, lookback=30):
     """Vùng hỗ trợ/kháng cự gần nhất = đáy/đỉnh gần nhất trong lookback nến"""
     recent = df.iloc[-lookback:]
@@ -924,12 +974,18 @@ def generate_signal():
     # (M5 quá nhiễu cho pattern này, M15 phản ánh cấu trúc rõ hơn)
     inside_bar = detect_inside_bar_setup(df_m15, atr_m15_series)
 
+    # MACD - đo momentum (tốc độ/gia tốc), khác trend (chỉ đo hướng)
+    macd_line, signal_line, hist = macd(df_m5["close"])
+    hist_now = hist.iloc[-1]
+    macd_bias = "up" if hist_now > 0 else ("down" if hist_now < 0 else None)
+    divergence = detect_divergence(df_m5, hist)
+
     session_ok = is_active_session()
     news_warning = check_upcoming_news()
 
     # --- Chấm điểm đơn giản (bạn có thể chỉnh trọng số) ---
     # Thang điểm tối đa: trend M5/M15/M30 (±1 mỗi cái) + pattern (±2) + BOS (±1) + OB (±1)
-    #                     + Inside Bar breakout (±1) = ±8
+    #                     + Inside Bar breakout (±1) + MACD momentum (±1) = ±9
     score = 0
     if trend_m5 == "up": score += 1
     if trend_m15 == "up": score += 1
@@ -945,6 +1001,8 @@ def generate_signal():
     if ob and ob["type"] == "bearish": score -= 1
     if inside_bar and inside_bar["breakout"] == "up": score += 1
     if inside_bar and inside_bar["breakout"] == "down": score -= 1
+    if macd_bias == "up": score += 1
+    if macd_bias == "down": score -= 1
 
     direction = None
     block_reason = None
@@ -991,6 +1049,18 @@ def generate_signal():
             signal_mode = "experimental"
             block_reason = None
 
+    momentum_note = None
+    if direction and divergence:
+        conflicts = (divergence == "bearish" and direction == "BUY") or \
+                    (divergence == "bullish" and direction == "SELL")
+        if conflicts:
+            confidence = "low"
+            label = "giảm" if divergence == "bearish" else "tăng"
+            confidence_notes.append(f"Phân kỳ {label} trên MACD — đà hiện tại có dấu hiệu cạn kiệt, ngược hướng tín hiệu")
+        else:
+            label = "giảm" if divergence == "bearish" else "tăng"
+            momentum_note = f"Phân kỳ {label} MACD đồng thuận, củng cố thêm cho hướng {direction}"
+
     if direction and news_warning:
         # KẾT HỢP: không còn chặn hẳn khi sắp có tin - vẫn đưa lệnh nhưng cảnh báo rõ rủi ro
         confidence = "low"
@@ -1008,7 +1078,7 @@ def generate_signal():
         pct_change = None
 
     # Mức độ mạnh của tín hiệu, quy ra thang 10 để dễ hình dung
-    strength_10 = round(min(10, abs(score) / 8 * 10), 1)
+    strength_10 = round(min(10, abs(score) / 9 * 10), 1)
 
     # --- Nhận định tổng quan (ghép các yếu tố thành 1-2 câu dễ hiểu) ---
     notes = []
@@ -1080,6 +1150,10 @@ def generate_signal():
         "zones_below": zones_below,
         "confidence": confidence,
         "confidence_notes": confidence_notes,
+        "macd_hist": hist_now,
+        "macd_bias": macd_bias,
+        "divergence": divergence,
+        "momentum_note": momentum_note,
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -1157,9 +1231,11 @@ def format_message(sig, win_stats=None, active_trades=None):
 
     # ---------- TRƯỜNG HỢP CÓ TÍN HIỆU: hiện đầy đủ chi tiết ----------
     if sig["direction"]:
-        lines.append(f"📶 Độ mạnh: {sig['strength_10']}/10   |   Điểm: {sig['score']}/±8")
+        lines.append(f"📶 Độ mạnh: {sig['strength_10']}/10   |   Điểm: {sig['score']}/±9")
+        macd_icon = "⬆️" if sig.get("macd_bias") == "up" else ("⬇️" if sig.get("macd_bias") == "down" else "➖")
         lines.append(f"📊 M5:{trend_icon(sig['trend_m5'])} M15:{trend_icon(sig['trend_m15'])} "
-                      f"M30:{trend_icon(sig['trend_m30'])}   RSI:{sig['rsi']:.0f} ADX:{sig['adx']:.0f}")
+                      f"M30:{trend_icon(sig['trend_m30'])}   RSI:{sig['rsi']:.0f} ADX:{sig['adx']:.0f} "
+                      f"MACD:{macd_icon}")
 
         details = []
         if sig["ob"]:
@@ -1181,6 +1257,8 @@ def format_message(sig, win_stats=None, active_trades=None):
 
         if sig.get("fib_note"):
             lines.append(f"✨ {sig['fib_note']}")
+        if sig.get("momentum_note"):
+            lines.append(f"✨ {sig['momentum_note']}")
         if sig["liquidity_note"]:
             lines.append(f"⚠️ Thanh khoản thấp (ngoài phiên chính)")
 
@@ -1212,7 +1290,7 @@ def format_message(sig, win_stats=None, active_trades=None):
 
     # ---------- TRƯỜNG HỢP KHÔNG CÓ TÍN HIỆU: rút gọn tối đa ----------
     else:
-        lines.append(f"📶 Điểm: {sig['score']}/±8   |   ADX: {sig['adx']:.0f}")
+        lines.append(f"📶 Điểm: {sig['score']}/±9   |   ADX: {sig['adx']:.0f}")
         reason = sig["block_reason"] if sig["block_reason"] else "Chưa đủ điều kiện vào lệnh"
         lines.append(f"⚪ {reason}")
 
