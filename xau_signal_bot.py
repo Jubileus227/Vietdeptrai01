@@ -448,10 +448,16 @@ def save_signal_log(log):
 
 
 def update_signal_outcomes(log, current_price):
-    """Kiểm tra các tín hiệu 'pending' cũ đã chạm TP1, chạm SL, hay hết hạn chưa."""
+    """
+    Kiểm tra các tín hiệu cũ:
+    - 'waiting_fill' (lệnh limit "chờ giá về"): kiểm tra giá đã pullback đủ để khớp lệnh chưa.
+      CHƯA khớp thì CHƯA tính thắng/thua - tránh đếm nhầm lệnh chưa từng vào.
+    - 'pending' (đã khớp - lệnh market, hoặc limit đã khớp): kiểm tra chạm TP1/SL/hết hạn như cũ.
+    """
     now = datetime.now(timezone.utc)
     for rec in log:
-        if rec.get("status") != "pending":
+        status = rec.get("status")
+        if status not in ("pending", "waiting_fill"):
             continue
         try:
             rec_time = datetime.fromisoformat(rec["time_iso"])
@@ -459,6 +465,19 @@ def update_signal_outcomes(log, current_price):
             rec["status"] = "expired"
             continue
 
+        if status == "waiting_fill":
+            direction = rec["direction"]
+            entry = rec["entry"]
+            # BUY limit: chờ giá GIẢM về entry. SELL limit: chờ giá TĂNG về entry.
+            filled = (direction == "BUY" and current_price <= entry) or \
+                     (direction == "SELL" and current_price >= entry)
+            if filled:
+                rec["status"] = "pending"  # đã khớp -> từ giờ mới bắt đầu tính thắng/thua
+            elif (now - rec_time) > timedelta(hours=SIGNAL_TIMEOUT_HOURS):
+                rec["status"] = "expired"  # giá không bao giờ pullback về -> lệnh chưa từng vào, bỏ qua
+            continue  # dù khớp hay chưa, vòng lặp này chưa xét thắng/thua
+
+        # status == "pending": đã khớp lệnh thật sự, xét thắng/thua như bình thường
         if rec["direction"] == "BUY":
             if current_price >= rec["tp1"]:
                 rec["status"] = "win"
@@ -479,6 +498,10 @@ def append_signal(log, sig):
     """Thêm tín hiệu vừa tạo (nếu có hướng BUY/SELL) vào log để theo dõi sau này."""
     if not sig.get("direction"):
         return log
+    entry_type = sig.get("entry_type", "market")
+    # Lệnh limit ("chờ giá về") bắt đầu ở trạng thái CHỜ KHỚP, không tính thắng/thua ngay.
+    # Lệnh market (vào giá hiện tại) coi như khớp ngay lập tức.
+    initial_status = "waiting_fill" if entry_type == "limit" else "pending"
     log.append({
         "time_iso": datetime.now(timezone.utc).isoformat(),
         "direction": sig["direction"],
@@ -487,7 +510,8 @@ def append_signal(log, sig):
         "tp1": sig["tp1"],
         "score": sig["score"],
         "mode": sig.get("signal_mode", "trend"),  # "trend" hoặc "mean_reversion" - để đánh giá riêng từng loại
-        "status": "pending",
+        "entry_type": entry_type,
+        "status": initial_status,
     })
     return log
 
