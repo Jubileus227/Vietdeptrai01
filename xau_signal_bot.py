@@ -748,60 +748,89 @@ def check_entry_chase(direction, current_price, ob, atr_value, max_atr_distance=
     return None
 
 
-def build_watch_zones(current_price, ob, sr, fib, atr_value):
+def _point_zone(price, tag, buffer_atr, atr_value):
+    """Biến 1 điểm giá thành 1 KHOẢNG phản ứng (range) bằng cách nới ra 2 bên theo ATR."""
+    b = buffer_atr * atr_value
+    return {"tag": tag, "price_low": price - b, "price_high": price + b}
+
+
+def build_raw_zones(ob, sr, fib, htf_levels, atr_value):
     """
-    Liệt kê các vùng giá đáng chú ý để đặt lệnh CHỜ (Buy Limit/Sell Limit) -
-    hiển thị LUÔN kể cả khi chưa đủ điều kiện ra tín hiệu chính thức.
-    Đây là thông tin tham khảo (bản đồ vùng giá), KHÔNG phải khuyến nghị vào lệnh ngay -
-    không cộng/trừ vào hệ thống chấm điểm, không ảnh hưởng đến logic tín hiệu chính.
+    Thu thập vùng giá từ mọi nguồn, biểu diễn dưới dạng KHOẢNG (price_low, price_high) -
+    đúng bản chất: thị trường phản ứng trong 1 vùng, không phải 1 điểm tuyệt đối.
+    - Order Block: dùng thẳng khoảng thật của nến OB (đã là 1 range sẵn)
+    - Hỗ trợ/Kháng cự/Fib/H1/H4: là các mức 1 điểm -> nới ra thành khoảng nhỏ theo ATR
     """
     zones = []
-
-    # --- Order Block: giá pullback về biên gần của OB thường là điểm entry đẹp ---
     if ob:
         zone_low, zone_high = ob["zone"]
-        if ob["type"] == "bullish" and current_price > zone_high:
-            zones.append({
-                "label": "Order Block (Bullish)", "tag": "OB", "order_type": "Buy Limit",
-                "price": zone_high, "distance_atr": round((current_price - zone_high) / atr_value, 1),
-            })
-        elif ob["type"] == "bearish" and current_price < zone_low:
-            zones.append({
-                "label": "Order Block (Bearish)", "tag": "OB", "order_type": "Sell Limit",
-                "price": zone_low, "distance_atr": round((zone_low - current_price) / atr_value, 1),
-            })
-
-    # --- Hỗ trợ/Kháng cự: vùng giá cổ điển để đặt lệnh chờ hồi ---
+        zones.append({"tag": "OB", "price_low": zone_low, "price_high": zone_high})
     if sr:
-        if current_price > sr["support"]:
-            zones.append({
-                "label": "Hỗ trợ gần nhất", "tag": "HT", "order_type": "Buy Limit",
-                "price": sr["support"], "distance_atr": round((current_price - sr["support"]) / atr_value, 1),
-            })
-        if current_price < sr["resistance"]:
-            zones.append({
-                "label": "Kháng cự gần nhất", "tag": "KC", "order_type": "Sell Limit",
-                "price": sr["resistance"], "distance_atr": round((sr["resistance"] - current_price) / atr_value, 1),
-            })
-
-    # --- Fibonacci 61.8%: vùng thường được nhiều trader/tổ chức chú ý ---
+        zones.append(_point_zone(sr["support"], "HT", 0.3, atr_value))
+        zones.append(_point_zone(sr["resistance"], "KC", 0.3, atr_value))
     if fib:
-        fib_618 = fib["levels"]["61.8"]
-        if fib["uptrend_leg"] and current_price > fib_618:
-            zones.append({
-                "label": "Fib 61.8% (retracement)", "tag": "Fib", "order_type": "Buy Limit",
-                "price": fib_618, "distance_atr": round((current_price - fib_618) / atr_value, 1),
-            })
-        elif not fib["uptrend_leg"] and current_price < fib_618:
-            zones.append({
-                "label": "Fib 61.8% (retracement)", "tag": "Fib", "order_type": "Sell Limit",
-                "price": fib_618, "distance_atr": round((fib_618 - current_price) / atr_value, 1),
-            })
+        zones.append(_point_zone(fib["levels"]["61.8"], "Fib", 0.25, atr_value))
+    for lv in htf_levels:
+        zones.append(_point_zone(lv["price"], lv["tf"], 0.2, atr_value))
+    return zones
 
-    # Chỉ giữ lại vùng đủ xa để có ý nghĩa (>=0.3 ATR), sắp theo khoảng cách gần -> xa
-    zones = [z for z in zones if z["distance_atr"] >= 0.3]
-    zones.sort(key=lambda z: z["distance_atr"])
-    return zones[:4]  # tối đa 4 vùng, tránh tin nhắn quá dài
+
+def merge_zones_into_ranges(zones, atr_value, merge_gap_mult=0.4):
+    """
+    Gộp các khoảng CHỒNG LẤN hoặc đủ GẦN NHAU (trong phạm vi merge_gap_mult x ATR) thành
+    1 vùng phản ứng duy nhất - đây chính là cách tính "confluence" đúng bản chất: nhiều
+    nguồn độc lập cùng rơi vào 1 khu vực thì gộp lại, càng nhiều nguồn gộp -> càng đáng tin.
+    """
+    if not zones:
+        return []
+    gap = atr_value * merge_gap_mult
+    sorted_zones = sorted(zones, key=lambda z: z["price_low"])
+
+    clusters = []
+    current = dict(sorted_zones[0])
+    current["sources"] = {sorted_zones[0]["tag"]}
+    for z in sorted_zones[1:]:
+        if z["price_low"] <= current["price_high"] + gap:
+            current["price_low"] = min(current["price_low"], z["price_low"])
+            current["price_high"] = max(current["price_high"], z["price_high"])
+            current["sources"].add(z["tag"])
+        else:
+            clusters.append(current)
+            current = dict(z)
+            current["sources"] = {z["tag"]}
+    clusters.append(current)
+
+    for c in clusters:
+        c["sources"] = sorted(c["sources"])
+        count = len(c["sources"])
+        c["stars"] = "⭐⭐" if count >= 3 else ("⭐" if count == 2 else "")
+    return clusters
+
+
+def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
+    """
+    Tính khoảng cách từ giá hiện tại tới từng vùng (0 nếu giá đang NẰM TRONG vùng),
+    xác định loại lệnh chờ phù hợp, tách theo Trên/Dưới, lọc bớt vùng quá gần (<0.3 ATR).
+    """
+    result = []
+    for c in clusters:
+        if current_price < c["price_low"]:
+            # vùng nằm TRÊN giá hiện tại -> giá phải tăng mới chạm -> đóng vai trò kháng cự
+            distance_atr = round((c["price_low"] - current_price) / atr_value, 1)
+            order_type = "Sell Limit"
+        elif current_price > c["price_high"]:
+            # vùng nằm DƯỚI giá hiện tại -> giá phải giảm mới chạm -> đóng vai trò hỗ trợ
+            distance_atr = round((current_price - c["price_high"]) / atr_value, 1)
+            order_type = "Buy Limit"
+        else:
+            continue  # giá đang nằm ngay trong vùng - không phải vùng "chờ tới" nữa
+        if distance_atr < 0.3:
+            continue
+        result.append({**c, "distance_atr": distance_atr, "order_type": order_type})
+
+    above = sorted([z for z in result if z["price_low"] > current_price], key=lambda z: z["distance_atr"])
+    below = sorted([z for z in result if z["price_high"] < current_price], key=lambda z: z["distance_atr"])
+    return above[:max_per_side], below[:max_per_side]
 
 
 # ============================================================
@@ -934,17 +963,11 @@ def generate_signal():
     htf_cache = refresh_htf_cache_if_needed()
     htf_levels = nearest_htf_levels(htf_cache, current_price, atr_m5, max_count=6)
 
-    all_zones = build_watch_zones(current_price, ob, sr, fib, atr_m5)
-    for lv in htf_levels:
-        all_zones.append({
-            "label": f"đỉnh/đáy cũ", "tag": lv["tf"],
-            "order_type": "Sell Limit" if lv["type"] == "high" else "Buy Limit",
-            "price": lv["price"], "distance_atr": lv["distance_atr"],
-        })
-
-    # Tách theo TRÊN (Sell Limit - giá phải tăng lên mới chạm) và DƯỚI (Buy Limit - giá phải giảm về)
-    zones_above = sorted([z for z in all_zones if z["price"] > current_price], key=lambda z: z["distance_atr"])[:3]
-    zones_below = sorted([z for z in all_zones if z["price"] < current_price], key=lambda z: z["distance_atr"])[:3]
+    # Vùng theo dõi: mỗi nguồn là 1 KHOẢNG giá (không phải điểm tuyệt đối), các khoảng
+    # chồng lấn/gần nhau tự động gộp thành 1 vùng phản ứng duy nhất (confluence tự nhiên)
+    raw_zones = build_raw_zones(ob, sr, fib, htf_levels, atr_m5)
+    clusters = merge_zones_into_ranges(raw_zones, atr_m5)
+    zones_above, zones_below = finalize_watch_zones(clusters, current_price, atr_m5)
 
     result = {
         "time": datetime.now().strftime("%H:%M:%S %d/%m"),
@@ -1101,7 +1124,8 @@ def format_message(sig, win_stats=None, active_trades=None):
 
     # ---------- Vùng theo dõi: LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
     def _fmt_zone(z):
-        return f"{z['price']:.2f}({z.get('tag', z['label'])})"
+        tags = "+".join(z["sources"])
+        return f"{z['price_low']:.2f}–{z['price_high']:.2f}({tags}{z.get('stars', '')})"
 
     if sig.get("zones_above") or sig.get("zones_below"):
         lines.append("📋 Vùng theo dõi (đặt lệnh chờ, so với giá hiện tại):")
