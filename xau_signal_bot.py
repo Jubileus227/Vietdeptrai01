@@ -648,6 +648,33 @@ def compute_win_rate(log, mode=None):
     }
 
 
+def active_trades_summary(log, max_count=3):
+    """
+    Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hết hạn) để nhắc lại mỗi lần chạy -
+    tránh trường hợp bạn quên mất 1 lệnh chờ (limit) đang treo, hoặc 1 lệnh đã khớp đang chạy.
+    """
+    now = datetime.now(timezone.utc)
+    active = [r for r in log if r.get("status") in ("waiting_fill", "pending")]
+    active = active[-max_count:]  # chỉ lấy các lệnh gần nhất, tránh tin nhắn quá dài
+
+    summary = []
+    for rec in active:
+        try:
+            rec_time = datetime.fromisoformat(rec["time_iso"])
+            hours_left = max(0, SIGNAL_TIMEOUT_HOURS - (now - rec_time).total_seconds() / 3600)
+        except Exception:
+            hours_left = None
+
+        icon = "🔁" if rec.get("mode") == "mean_reversion" else "📈"
+        if rec["status"] == "waiting_fill":
+            time_txt = f", còn {hours_left:.1f}h" if hours_left is not None else ""
+            summary.append(f"{icon} {rec['direction']} Limit @ {rec['entry']:.2f} (chờ khớp{time_txt})")
+        else:  # pending - đã khớp, đang chạy chờ TP/SL
+            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy)")
+
+    return summary
+
+
 def mean_reversion_signal(current_price, sr, rsi_value, atr_value, near_threshold=0.25):
     """
     Chiến lược RIÊNG cho lúc thị trường sideway (ADX thấp) — khác hẳn logic trend-following.
@@ -997,7 +1024,7 @@ def generate_signal():
 # ============================================================
 # 4. FORMAT TIN NHẮN & GỬI TELEGRAM
 # ============================================================
-def format_message(sig, win_stats=None):
+def format_message(sig, win_stats=None, active_trades=None):
     """
     2 kiểu tin nhắn:
     - CÓ tín hiệu (BUY/SELL): đầy đủ chi tiết kỹ thuật, vì đây là lúc cần đủ thông tin để quyết định.
@@ -1068,6 +1095,10 @@ def format_message(sig, win_stats=None):
         reason = sig["block_reason"] if sig["block_reason"] else "Chưa đủ điều kiện vào lệnh"
         lines.append(f"⚪ {reason}")
 
+    # ---------- Nhắc lại lệnh đang chờ khớp / đang chạy (nếu có) ----------
+    if active_trades:
+        lines.append("⏳ Lệnh đang theo dõi: " + " | ".join(active_trades))
+
     # ---------- Vùng theo dõi: LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
     def _fmt_zone(z):
         return f"{z['price']:.2f}({z.get('tag', z['label'])})"
@@ -1109,9 +1140,12 @@ if __name__ == "__main__":
     print("Đang lấy dữ liệu và phân tích...")
     signal = generate_signal()
 
-    # --- Cập nhật kết quả các tín hiệu cũ, thêm tín hiệu mới, tính tỷ lệ thắng/thua RIÊNG từng loại ---
+    # --- Cập nhật kết quả các tín hiệu cũ, tính danh sách lệnh đang hoạt động TRƯỚC khi thêm tín hiệu mới ---
+    # (tránh lặp lại chính tín hiệu vừa tạo - nó đã hiển thị đầy đủ ở phần trên tin nhắn rồi)
     log = load_signal_log()
     log = update_signal_outcomes(log, signal["price"])
+    active_trades = active_trades_summary(log)
+
     log = append_signal(log, signal)
     save_signal_log(log)
     win_stats = {
@@ -1119,7 +1153,7 @@ if __name__ == "__main__":
         "mean_reversion": compute_win_rate(log, mode="mean_reversion"),
     }
 
-    message = format_message(signal, win_stats=win_stats)
+    message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
     print(message)
 
     print("\nĐang gửi vào Telegram...")
