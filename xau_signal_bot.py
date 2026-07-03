@@ -300,7 +300,34 @@ def is_market_closed(now_utc=None):
     return False
 
 
-def trading_hours_elapsed(start, end):
+def is_market_flat(df, lookback=12, min_range_ratio=0.0003):
+    """
+    Phát hiện thị trường ĐANG ĐỨNG YÊN (nghỉ lễ, đóng cửa ngoài lịch cuối tuần thông
+    thường, hoặc feed dữ liệu bị "đứng") - dựa THẲNG vào dữ liệu giá thật, không chỉ
+    đoán theo lịch cố định (is_market_closed không bắt được ngày nghỉ lễ vì nó không
+    nằm trong lịch cuối tuần cứng).
+
+    Coi là "đứng yên" khi trong 'lookback' nến gần nhất (mặc định 12 nến M5 = 1 tiếng):
+    - Biên độ dao động (high-low) quá nhỏ so với giá (< 0.03% giá), HOẶC
+    - Giá đóng cửa gần như giống hệt nhau suốt cả khung đó (dấu hiệu feed bị "đứng"
+      vì sàn không cập nhật giá mới - đúng những gì xảy ra khi API vẫn trả về được
+      nhưng chỉ lặp lại giá cuối cùng trước khi nghỉ lễ).
+    """
+    if len(df) < lookback:
+        return False
+    recent = df.iloc[-lookback:]
+    price = recent["close"].iloc[-1]
+    if price <= 0:
+        return False
+
+    price_range = recent["high"].max() - recent["low"].min()
+    range_ratio = price_range / price
+    identical_closes = recent["close"].nunique() <= 2  # gần như không đổi giá suốt cả khung
+
+    return range_ratio < min_range_ratio or identical_closes
+
+
+
     """
     Tính số GIỜ GIAO DỊCH THỰC TẾ trôi qua giữa start và end - KHÔNG tính giờ cuối
     tuần thị trường đóng cửa. Dùng để hạn mức hết hạn (SIGNAL_TIMEOUT_HOURS) công
@@ -1216,6 +1243,11 @@ def generate_signal(active_zone_directions=None):
     df_m30 = resample_ohlc(df_m5, "30min")
     df_h1 = resample_ohlc(df_m5, "1h")
 
+    # Phát hiện thị trường ĐANG ĐỨNG YÊN (nghỉ lễ, ngoài lịch cuối tuần cố định) dựa
+    # thẳng vào dữ liệu giá thật - is_market_closed() chỉ bắt được cuối tuần, không
+    # bắt được ngày nghỉ lễ vì nó không nằm trong lịch cứng.
+    market_flat = is_market_flat(df_m5)
+
     trend_m5 = detect_trend(df_m5)
     trend_m15 = detect_trend(df_m15)
     trend_m30 = detect_trend(df_m30)
@@ -1284,12 +1316,14 @@ def generate_signal(active_zone_directions=None):
     confidence = "normal"   # "normal" hoặc "low" - độ tin cậy của tín hiệu
     confidence_notes = []   # lý do hạ độ tin cậy, hiển thị rõ cho người dùng tự cân nhắc
 
-    if score >= SIGNAL_THRESHOLD:
+    if market_flat:
+        block_reason = "Thị trường đang đứng yên (nghỉ lễ/ngoài giờ giao dịch thực) - dữ liệu gần như không đổi, tạm dừng phân tích"
+    elif score >= SIGNAL_THRESHOLD:
         direction = "BUY"
     elif score <= -SIGNAL_THRESHOLD:
         direction = "SELL"
 
-    is_sideway = adx_m15 < ADX_MIN
+    is_sideway = adx_m15 < ADX_MIN and not market_flat  # đứng yên thì không tính là "sideway có thể đánh", tắt hẳn chuỗi tín hiệu
     trend_direction = direction  # giữ lại hướng gốc theo điểm số, dùng lại nếu hạ độ tin cậy thay vì chặn hẳn
 
     # --- Nếu đang sideway: ưu tiên thử mean-reversion trước (chiến lược phù hợp hơn cho sideway) ---
@@ -1443,6 +1477,7 @@ def generate_signal(active_zone_directions=None):
         "chase_warning": None,
         "zones_above": zones_above,
         "zones_below": zones_below,
+        "market_flat": market_flat,
         "confidence": confidence,
         "confidence_notes": confidence_notes,
         "macd_hist": hist_now,
@@ -1685,6 +1720,10 @@ if __name__ == "__main__":
 
     print("Đang lấy dữ liệu và phân tích...")
     signal = generate_signal(active_zone_directions=active_zone_dirs)
+
+    if signal.get("market_flat"):
+        print("Thị trường đang đứng yên (nghỉ lễ/dữ liệu không đổi) -> bỏ qua lần chạy này, không gửi Telegram.")
+        exit(0)
 
     # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
     log = update_signal_outcomes(log, signal["price"])
