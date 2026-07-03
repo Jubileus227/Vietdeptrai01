@@ -37,6 +37,10 @@ SIGNAL_LOG_PATH = "signal_log.json"   # file lưu lịch sử tín hiệu để 
 SIGNAL_LOG_MAX = 300                  # số bản ghi tối đa giữ lại trong file log
 SIGNAL_TIMEOUT_HOURS = 4              # sau X giờ chưa chạm TP/SL thì coi là hết hạn, không tính thắng/thua
 
+PIP_SIZE = 0.01                       # quy ước 1 pip XAU/USD = 0.01 (khớp cách hiển thị SL/TP hiện tại)
+MAX_STACK_PER_DIRECTION = 3           # tối đa bao nhiêu lệnh cùng chiều/cùng loại được chạy song song
+MIN_SCORE_IMPROVEMENT_TO_STACK = 2    # điểm mới phải mạnh hơn lệnh đang chạy ít nhất bấy nhiêu mới được "nhồi"
+
 # ============================================================
 # 1. LẤY DỮ LIỆU GIÁ TỪ TWELVE DATA
 # ============================================================
@@ -669,6 +673,8 @@ def update_signal_outcomes(log, current_price):
             rec["status"] = "expired"
             continue
 
+        timeout = rec.get("timeout_hours", SIGNAL_TIMEOUT_HOURS)  # Zone Setup có thời hạn riêng (ngắn/trung/dài)
+
         if status == "waiting_fill":
             direction = rec["direction"]
             entry = rec["entry"]
@@ -677,7 +683,7 @@ def update_signal_outcomes(log, current_price):
                      (direction == "SELL" and current_price >= entry)
             if filled:
                 rec["status"] = "pending"  # đã khớp -> từ giờ mới bắt đầu tính thắng/thua
-            elif trading_hours_elapsed(rec_time, now) > SIGNAL_TIMEOUT_HOURS:
+            elif trading_hours_elapsed(rec_time, now) > timeout:
                 rec["status"] = "expired"  # giá không bao giờ pullback về -> lệnh chưa từng vào, bỏ qua
             continue  # dù khớp hay chưa, vòng lặp này chưa xét thắng/thua
 
@@ -685,17 +691,84 @@ def update_signal_outcomes(log, current_price):
         if rec["direction"] == "BUY":
             if current_price >= rec["tp1"]:
                 rec["status"] = "win"
+                rec["pips"] = round((rec["tp1"] - rec["entry"]) / PIP_SIZE, 1)
             elif current_price <= rec["sl"]:
                 rec["status"] = "loss"
+                rec["pips"] = round((rec["sl"] - rec["entry"]) / PIP_SIZE, 1)  # số âm
         else:  # SELL
             if current_price <= rec["tp1"]:
                 rec["status"] = "win"
+                rec["pips"] = round((rec["entry"] - rec["tp1"]) / PIP_SIZE, 1)
             elif current_price >= rec["sl"]:
                 rec["status"] = "loss"
+                rec["pips"] = round((rec["entry"] - rec["sl"]) / PIP_SIZE, 1)  # số âm
 
-        if rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > SIGNAL_TIMEOUT_HOURS:
+        if rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > timeout:
             rec["status"] = "expired"
     return log
+
+
+def manage_active_trades_before_append(log, sig, current_price):
+    """
+    Quản lý việc "nhồi lệnh" khi có tín hiệu MỚI cùng chiều + cùng loại (trend/mean_reversion)
+    với 1 hoặc nhiều lệnh CŨ đang chạy (waiting_fill/pending). Áp dụng 3 quy tắc đã thống nhất:
+
+    1. HÒA VỐN: lệnh cũ nào chưa chạm SL và giá hiện tại đang ở phía CÓ LỢI so với entry của nó
+       (đã "an toàn") -> đóng lại luôn với kết quả "hòa vốn" (breakeven), không tính thắng/thua,
+       giải phóng chỗ thay vì để nó "trôi" song song vô thời hạn.
+    2. GIỚI HẠN NHỒI: sau khi hòa vốn xong, nếu số lệnh CÙNG chiều/loại còn đang chạy đã đạt
+       MAX_STACK_PER_DIRECTION -> KHÔNG cho nhồi thêm, dù điểm số có mạnh hơn bao nhiêu.
+    3. NHỒI CÓ LÝ DO: nếu còn dưới giới hạn, chỉ cho nhồi thêm khi điểm tín hiệu mới mạnh hơn
+       lệnh đang chạy gần nhất ít nhất MIN_SCORE_IMPROVEMENT_TO_STACK điểm - kèm lý do rõ ràng.
+       Nếu không đủ mạnh hơn, KHÔNG tạo bản ghi mới - chỉ trả về ghi chú để hiển thị tham khảo,
+       tránh vừa nhồi lệnh vô tội vạ vừa làm loãng thống kê thắng/thua.
+
+    Trả về: (log đã cập nhật, should_append: bool, stack_note: str hoặc None)
+    """
+    direction = sig.get("direction")
+    mode = sig.get("signal_mode")
+    if not direction or mode not in ("trend", "mean_reversion"):
+        return log, True, None
+
+    active = [r for r in log if r.get("mode") == mode and r.get("direction") == direction
+              and r.get("status") in ("waiting_fill", "pending")]
+
+    # --- Bước 1: hòa vốn các lệnh cũ đã "an toàn" (chưa chạm SL, đang có lợi) ---
+    for rec in active:
+        if rec["status"] != "pending":
+            continue  # lệnh limit chưa khớp thì chưa có gì để tính hòa vốn
+        favorable = (direction == "BUY" and current_price > rec["entry"]) or \
+                    (direction == "SELL" and current_price < rec["entry"])
+        if favorable:
+            rec["status"] = "breakeven"
+            rec["pips"] = 0.0
+
+    active = [r for r in active if r["status"] in ("waiting_fill", "pending")]  # cập nhật lại sau hòa vốn
+
+    # --- Bước 2 + 3: quyết định có cho nhồi thêm không ---
+    if not active:
+        return log, True, None  # không có lệnh nào đang chạy -> tạo bình thường
+
+    if len(active) >= MAX_STACK_PER_DIRECTION:
+        note = (f"Đã đạt giới hạn {MAX_STACK_PER_DIRECTION} lệnh {direction} ({mode}) chạy song song "
+                f"-> KHÔNG nhồi thêm, chỉ tham khảo phân tích lần này.")
+        return log, False, note
+
+    latest_active = active[-1]
+    old_score = abs(latest_active.get("score", 0))
+    new_score = abs(sig.get("score", 0))
+    if new_score - old_score >= MIN_SCORE_IMPROVEMENT_TO_STACK:
+        note = (f"📦 NHỒI LỆNH: điểm mới ({sig['score']}) mạnh hơn lệnh {direction} đang chạy "
+                f"(điểm {latest_active.get('score', 0)}) từ {MIN_SCORE_IMPROVEMENT_TO_STACK}+ điểm.")
+        return log, True, note
+
+    entry_old = latest_active["entry"]
+    pips_now = round((current_price - entry_old) / PIP_SIZE, 1) if direction == "BUY" \
+        else round((entry_old - current_price) / PIP_SIZE, 1)
+    note = (f"Đã có {len(active)} lệnh {direction} ({mode}) đang chạy (gần nhất entry {entry_old:.2f}, "
+            f"hiện {'+' if pips_now >= 0 else ''}{pips_now}p) - điểm mới ({sig['score']}) chưa đủ mạnh hơn "
+            f"rõ rệt để nhồi thêm, chỉ tham khảo.")
+    return log, False, note
 
 
 def append_signal(log, sig):
@@ -713,19 +786,54 @@ def append_signal(log, sig):
         "sl": sig["sl"],
         "tp1": sig["tp1"],
         "score": sig["score"],
-        "mode": sig.get("signal_mode", "trend"),  # "trend" hoặc "mean_reversion" - để đánh giá riêng từng loại
+        "mode": sig.get("signal_mode", "trend"),  # "trend"/"mean_reversion"/"zone_setup"/"experimental"
         "confidence": sig.get("confidence", "normal"),  # "normal" hoặc "low" - để so sánh 2 mức tin cậy
         "entry_type": entry_type,
         "status": initial_status,
+        "timeout_hours": sig.get("timeout_hours", SIGNAL_TIMEOUT_HOURS),
     })
     return log
 
 
+def append_zone_setup_secondary(log, sig):
+    """
+    Ghi thêm bản ghi cho Zone Setup THỨ 2 (chiều đối diện), nếu cả BUY lẫn SELL cùng
+    xác nhận đồng thời ở 2 vùng khác nhau (vd: BUY tại hỗ trợ dưới + SELL tại kháng cự trên).
+    """
+    sec = sig.get("zone_setup_secondary")
+    if not sec:
+        return log
+    log.append({
+        "time_iso": datetime.now(timezone.utc).isoformat(),
+        "direction": sec["direction"],
+        "entry": sec["entry"],
+        "sl": sec["sl"],
+        "tp1": sec["tp1"],
+        "score": sig["score"],
+        "mode": "zone_setup",
+        "confidence": "normal",
+        "entry_type": "market",
+        "status": "pending",
+        "timeout_hours": sec["timeout_hours"],
+    })
+    return log
+
+
+def active_zone_setup_directions(log):
+    """
+    Trả về tập các hướng (BUY/SELL) đang có Zone Setup CÒN HIỆU LỰC (chưa thắng/thua/hết hạn) -
+    dùng để tránh tạo thêm setup trùng chiều mỗi 5 phút (không "chồng lệnh" cùng 1 bên).
+    """
+    return {r["direction"] for r in log
+            if r.get("mode") == "zone_setup" and r.get("status") in ("waiting_fill", "pending")}
+
+
 def compute_win_rate(log, mode=None, confidence=None):
     """
-    Tính tỷ lệ thắng/thua. Nếu truyền mode ("trend" hoặc "mean_reversion"),
-    chỉ tính riêng loại đó. Nếu truyền confidence ("normal" hoặc "low"), lọc thêm theo
-    độ tin cậy -> cho phép so sánh tín hiệu 🟡 THẤP có thực sự kém hơn 🟢 bình thường không.
+    Tính tỷ lệ thắng/thua + tổng số pip + số lệnh hòa vốn. Nếu truyền mode
+    ("trend" hoặc "mean_reversion"...), chỉ tính riêng loại đó. Nếu truyền confidence
+    ("normal" hoặc "low"), lọc thêm theo độ tin cậy -> cho phép so sánh tín hiệu
+    🟡 THẤP có thực sự kém hơn 🟢 bình thường không.
     Bản ghi log cũ (trước khi có trường 'mode'/'confidence') coi là 'trend'/'normal' để không mất dữ liệu.
     """
     if mode:
@@ -734,20 +842,25 @@ def compute_win_rate(log, mode=None, confidence=None):
         log = [r for r in log if r.get("confidence", "normal") == confidence]
     closed = [r for r in log if r.get("status") in ("win", "loss")]
     wins = [r for r in closed if r["status"] == "win"]
-    if not closed:
+    breakevens = [r for r in log if r.get("status") == "breakeven"]
+    if not closed and not breakevens:
         return None
+    total_pips = round(sum(r.get("pips", 0) for r in closed), 1)
     return {
         "wins": len(wins),
         "losses": len(closed) - len(wins),
         "total": len(closed),
-        "win_rate": round(len(wins) / len(closed) * 100, 1),
+        "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else 0.0,
+        "breakevens": len(breakevens),
+        "total_pips": total_pips,
     }
 
 
-def active_trades_summary(log, max_count=3):
+def active_trades_summary(log, current_price=None, max_count=3):
     """
-    Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hết hạn) để nhắc lại mỗi lần chạy -
+    Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hòa vốn/hết hạn) để nhắc lại mỗi lần chạy -
     tránh trường hợp bạn quên mất 1 lệnh chờ (limit) đang treo, hoặc 1 lệnh đã khớp đang chạy.
+    Nếu truyền current_price, hiện thêm số pip lời/lỗ tạm tính cho lệnh đã khớp.
     """
     now = datetime.now(timezone.utc)
     active = [r for r in log if r.get("status") in ("waiting_fill", "pending")]
@@ -755,9 +868,10 @@ def active_trades_summary(log, max_count=3):
 
     summary = []
     for rec in active:
+        timeout = rec.get("timeout_hours", SIGNAL_TIMEOUT_HOURS)
         try:
             rec_time = datetime.fromisoformat(rec["time_iso"])
-            hours_left = max(0, SIGNAL_TIMEOUT_HOURS - trading_hours_elapsed(rec_time, now))
+            hours_left = max(0, timeout - trading_hours_elapsed(rec_time, now))
         except Exception:
             hours_left = None
 
@@ -766,7 +880,12 @@ def active_trades_summary(log, max_count=3):
             time_txt = f", còn {hours_left:.1f}h" if hours_left is not None else ""
             summary.append(f"{icon} {rec['direction']} Limit @ {rec['entry']:.2f} (chờ khớp{time_txt})")
         else:  # pending - đã khớp, đang chạy chờ TP/SL
-            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy)")
+            pips_txt = ""
+            if current_price is not None:
+                pips_now = (current_price - rec["entry"]) / PIP_SIZE if rec["direction"] == "BUY" \
+                    else (rec["entry"] - current_price) / PIP_SIZE
+                pips_txt = f", {'+' if pips_now >= 0 else ''}{pips_now:.1f}p"
+            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy{pips_txt})")
 
     return summary
 
@@ -815,6 +934,107 @@ def mean_reversion_signal(current_price, sr, rsi_value, atr_value, near_threshol
     return {
         "direction": direction, "entry": current_price, "sl": sl,
         "tp1": tp1, "tp2": tp2, "tp3": tp3, "position_in_range": round(position, 2),
+    }
+
+
+def has_reaction_candle(df, direction, atr_value):
+    """
+    Nến M5 xác nhận phản ứng ĐỦ MẠNH tại 1 vùng giá - điều kiện bắt buộc để Zone Setup
+    được coi là "đã xác nhận" (không phải chờ mù trong tương lai). Chấp nhận 2 kiểu:
+    1. Engulfing đúng chiều (đảo chiều rõ ràng)
+    2. Nến có RÂU DÀI từ chối rõ (>=40% biên độ nến) + đóng cửa đúng hướng mong đợi
+    Bắt buộc biên độ nến >= 1x ATR(M5) - lọc bớt phản ứng yếu ớt, không đáng tin (theo đề xuất
+    đã thống nhất: 1 nến Engulfing/reject nhỏ xíu không đáng tin bằng nến biên độ lớn).
+    """
+    if len(df) < 2 or atr_value <= 0:
+        return False
+    c = df.iloc[-1]
+    candle_range = c["high"] - c["low"]
+    if candle_range < atr_value:
+        return False  # nến quá nhỏ so với biến động trung bình, phản ứng yếu, bỏ qua
+
+    pattern = detect_candle_pattern(df)
+    if direction == "BUY" and pattern == "bullish_engulfing":
+        return True
+    if direction == "SELL" and pattern == "bearish_engulfing":
+        return True
+
+    body_low, body_high = min(c["open"], c["close"]), max(c["open"], c["close"])
+    if direction == "BUY":
+        lower_wick = body_low - c["low"]
+        if lower_wick >= candle_range * 0.4 and c["close"] > c["open"]:
+            return True
+    else:
+        upper_wick = c["high"] - body_high
+        if upper_wick >= candle_range * 0.4 and c["close"] < c["open"]:
+            return True
+    return False
+
+
+def zone_tier_info(sources, htf_cache, atr_m5):
+    """
+    Xác định 'tuổi thọ' của Zone Setup dựa theo nguồn XA NHẤT cấu thành vùng giá -
+    đúng nguyên lý đã thống nhất: khung nguồn càng lớn, SL càng rộng, chờ càng lâu.
+    - Có H4 trong nguồn -> DÀI HẠN: SL theo ATR(H4), chờ tối đa ~18 ngày (giao dịch)
+    - Có H1 (không H4)  -> TRUNG HẠN: SL theo ATR(H1), chờ tối đa ~3 ngày (giao dịch)
+    - Chỉ nguồn M5 (OB/Fib/HT/KC) -> NGẮN HẠN: SL theo ATR(M5), chờ tối đa 4 tiếng (mặc định)
+    """
+    atr_h1 = htf_cache.get("atr_h1") if htf_cache else None
+    atr_h4 = htf_cache.get("atr_h4") if htf_cache else None
+
+    if "H4" in sources and atr_h4:
+        return {"tier": "long", "label": "DÀI HẠN (nguồn H4)", "atr": atr_h4, "timeout_hours": 24 * 18}
+    if "H1" in sources and atr_h1:
+        return {"tier": "medium", "label": "TRUNG HẠN (nguồn H1)", "atr": atr_h1, "timeout_hours": 24 * 3}
+    return {"tier": "short", "label": "NGẮN HẠN (M5)", "atr": atr_m5, "timeout_hours": SIGNAL_TIMEOUT_HOURS}
+
+
+def build_zone_setup_candidate(direction, zone, current_price, df_m5, atr_m5, htf_cache, opposite_zones):
+    """
+    Tạo 1 Zone Setup THẬT từ 1 vùng theo dõi - chỉ kích hoạt khi ĐỦ CẢ 3 điều kiện:
+    1. Vùng có độ tin cậy (>=1 sao, tức >=2 nguồn đồng thuận) - không dùng vùng đơn lẻ 1 nguồn
+    2. Giá đã chạy TỚI hoặc rất gần vùng đó (<=0.6x ATR) - không phải setup cho tương lai xa
+    3. Có nến M5 xác nhận phản ứng đủ mạnh tại đó (has_reaction_candle)
+    Entry = khoảng giá của vùng (không phải 1 điểm) + vào theo giá thị trường ngay khi xác nhận.
+    SL/thời hạn theo "tuổi thọ" của nguồn (zone_tier_info). TP ưu tiên lấy từ vùng đối diện gần
+    nhất (mức cấu trúc thật), không phải nhân hệ số tùy ý.
+    """
+    if not zone.get("stars"):
+        return None
+    if zone["distance_atr"] > 0.6:
+        return None
+    if not has_reaction_candle(df_m5, direction, atr_m5):
+        return None
+
+    tier = zone_tier_info(zone["sources"], htf_cache, atr_m5)
+    sl_buffer = tier["atr"]
+
+    if direction == "BUY":
+        sl = zone["price_low"] - sl_buffer
+    else:
+        sl = zone["price_high"] + sl_buffer
+
+    entry = current_price
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return None
+
+    def _opp_price(z):
+        return z["price_low"] if direction == "BUY" else z["price_high"]
+
+    tp1 = _opp_price(opposite_zones[0]) if opposite_zones else None
+    if tp1 is None or abs(tp1 - entry) < risk:  # vùng đối diện quá gần/không có -> fallback nhân R
+        tp1 = entry + risk * 2.0 if direction == "BUY" else entry - risk * 2.0
+    tp2 = _opp_price(opposite_zones[1]) if len(opposite_zones) > 1 else \
+        (entry + risk * 3.0 if direction == "BUY" else entry - risk * 3.0)
+    tp3 = _opp_price(opposite_zones[2]) if len(opposite_zones) > 2 else \
+        (entry + risk * 4.0 if direction == "BUY" else entry - risk * 4.0)
+
+    return {
+        "direction": direction, "entry": entry, "entry_zone": (zone["price_low"], zone["price_high"]),
+        "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3, "rr": round(abs(tp1 - entry) / risk, 2),
+        "tier": tier["tier"], "tier_label": tier["label"], "timeout_hours": tier["timeout_hours"],
+        "stars": zone["stars"], "sources": zone["sources"],
     }
 
 
@@ -987,7 +1207,8 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 # ============================================================
 # 3. LOGIC TẠO TÍN HIỆU
 # ============================================================
-def generate_signal():
+def generate_signal(active_zone_directions=None):
+    active_zone_directions = active_zone_directions or set()
     # Chỉ gọi API 1 lần (lấy nhiều nến M5), sau đó tự gộp thành M15/M30/H1
     # -> tiết kiệm request, cho phép chạy mỗi 5 phút mà vẫn trong hạn mức free
     df_m5 = get_ohlc("5min", outputsize=1000)  # ~3.5 ngày dữ liệu M5
@@ -1011,6 +1232,17 @@ def generate_signal():
     sr = support_resistance(df_m5)
     fib = fibonacci_levels(df_m30, lookback=50)
     current_price = df_m5.iloc[-1]["close"]
+
+    # Cache mức giá H1/H4 lịch sử - chỉ tải lại mỗi giờ, không tốn request mỗi lần chạy
+    htf_cache = refresh_htf_cache_if_needed()
+    htf_levels = nearest_htf_levels(htf_cache, current_price, atr_m5, max_count=6)
+
+    # Vùng theo dõi: mỗi nguồn là 1 KHOẢNG giá (không phải điểm tuyệt đối), các khoảng
+    # chồng lấn/gần nhau tự động gộp thành 1 vùng phản ứng duy nhất (confluence tự nhiên).
+    # Tính SỚM ở đây (trước khi quyết định hướng) vì Zone Setup bên dưới cần dùng đến.
+    raw_zones = build_raw_zones(ob, sr, fib, htf_levels, atr_m5)
+    clusters = merge_zones_into_ranges(raw_zones, atr_m5)
+    zones_above, zones_below = finalize_watch_zones(clusters, current_price, atr_m5)
 
     # Mẫu hình nến mẹ - nến con (Inside Bar), quét trên M15 theo đề xuất
     # (M5 quá nhiễu cho pattern này, M15 phản ánh cấu trúc rõ hơn)
@@ -1080,16 +1312,47 @@ def generate_signal():
         direction = None
         block_reason = "Thị trường đi ngang (ADX thấp) và điểm số cũng chưa đủ ngưỡng"
 
-    # --- Hạng mục THỬ NGHIỆM (rủi ro cao hơn) - chỉ kích hoạt khi thị trường THỰC SỰ đứng yên:
-    # không có trend, không có mean-reversion chuẩn. Đây là lúc bot vốn sẽ hoàn toàn im lặng.
-    # Không kích hoạt nếu sắp có tin (rủi ro chồng rủi ro, không hợp lý dù là "thử nghiệm").
+    # --- ZONE SETUP: setup THẬT tại vùng đáng tin cậy (>=1 sao, tức >=2 nguồn đồng thuận),
+    # CHỈ kích hoạt khi có nến M5 xác nhận phản ứng đủ mạnh ngay tại đó (has_reaction_candle) -
+    # đúng phong cách "chờ nến xác nhận" thay vì đặt lệnh chờ mù. Chỉ xét khi Trend và
+    # Mean-Reversion đều không có tín hiệu ("giá đang chạy ở giữa", không phải lúc trend rõ
+    # hay lúc ở biên range). Có thể có ĐỒNG THỜI cả BUY (từ vùng dưới) và SELL (từ vùng trên)
+    # nếu cả 2 cùng xác nhận cùng lúc - không giới hạn chỉ 1 chiều.
+    zone_setup_primary = None
+    zone_setup_secondary = None
     exp = None
     if is_sideway and not mr and not trend_direction and not news_warning:
-        exp = experimental_range_signal(current_price, sr, rsi_m5, atr_m5)
-        if exp:
-            direction = exp["direction"]
-            signal_mode = "experimental"
+        buy_zone = zones_below[0] if zones_below else None
+        sell_zone = zones_above[0] if zones_above else None
+
+        buy_candidate = None
+        if buy_zone and "BUY" not in active_zone_directions:
+            buy_candidate = build_zone_setup_candidate(
+                "BUY", buy_zone, current_price, df_m5, atr_m5, htf_cache, zones_above)
+        sell_candidate = None
+        if sell_zone and "SELL" not in active_zone_directions:
+            sell_candidate = build_zone_setup_candidate(
+                "SELL", sell_zone, current_price, df_m5, atr_m5, htf_cache, zones_below)
+
+        candidates = [c for c in (buy_candidate, sell_candidate) if c]
+        if candidates:
+            # Ưu tiên vùng nhiều nguồn đồng thuận hơn (nhiều sao hơn), sau đó tới R:R tốt hơn
+            candidates.sort(key=lambda c: (len(c["sources"]), c["rr"]), reverse=True)
+            zone_setup_primary = candidates[0]
+            if len(candidates) > 1:
+                zone_setup_secondary = candidates[1]
+
+        if zone_setup_primary:
+            direction = zone_setup_primary["direction"]
+            signal_mode = "zone_setup"
             block_reason = None
+        else:
+            # Không có Zone Setup nào đủ điều kiện -> fallback THỬ NGHIỆM (lỏng hơn, độ tin cậy thấp hơn)
+            exp = experimental_range_signal(current_price, sr, rsi_m5, atr_m5)
+            if exp:
+                direction = exp["direction"]
+                signal_mode = "experimental"
+                block_reason = None
 
     momentum_note = None
     if direction and divergence:
@@ -1148,16 +1411,6 @@ def generate_signal():
 
     overview = "; ".join(notes) + "."
 
-    # Cache mức giá H1/H4 lịch sử - chỉ tải lại mỗi giờ, không tốn request mỗi lần chạy
-    htf_cache = refresh_htf_cache_if_needed()
-    htf_levels = nearest_htf_levels(htf_cache, current_price, atr_m5, max_count=6)
-
-    # Vùng theo dõi: mỗi nguồn là 1 KHOẢNG giá (không phải điểm tuyệt đối), các khoảng
-    # chồng lấn/gần nhau tự động gộp thành 1 vùng phản ứng duy nhất (confluence tự nhiên)
-    raw_zones = build_raw_zones(ob, sr, fib, htf_levels, atr_m5)
-    clusters = merge_zones_into_ranges(raw_zones, atr_m5)
-    zones_above, zones_below = finalize_watch_zones(clusters, current_price, atr_m5)
-
     result = {
         "time": datetime.now().strftime("%H:%M:%S %d/%m"),
         "price": current_price,
@@ -1196,6 +1449,8 @@ def generate_signal():
         "macd_bias": macd_bias,
         "divergence": divergence,
         "momentum_note": momentum_note,
+        "zone_setup_secondary": zone_setup_secondary,
+        "timeout_hours": SIGNAL_TIMEOUT_HOURS,
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -1206,6 +1461,18 @@ def generate_signal():
             "tp1": mr["tp1"], "tp2": mr["tp2"], "tp3": mr["tp3"],
         })
         result["fib_note"] = fib_confluence_note(fib, mr["entry"], mr["sl"], mr["tp1"], atr_m5)
+
+    elif direction and signal_mode == "zone_setup":
+        # Setup thật tại vùng đáng tin cậy, đã có nến xác nhận phản ứng.
+        # Entry hiển thị dạng KHOẢNG (đúng khoảng của vùng), SL/thời hạn theo "tuổi thọ" nguồn,
+        # TP ưu tiên lấy từ vùng đối diện gần nhất (mức cấu trúc thật).
+        z = zone_setup_primary
+        result.update({
+            "entry": z["entry"], "sl": z["sl"], "tp1": z["tp1"], "tp2": z["tp2"], "tp3": z["tp3"],
+            "entry_zone": z["entry_zone"], "rr": z["rr"], "tier_label": z["tier_label"],
+            "zone_stars": z["stars"], "zone_sources": z["sources"], "timeout_hours": z["timeout_hours"],
+        })
+        result["fib_note"] = fib_confluence_note(fib, z["entry"], z["sl"], z["tp1"], atr_m5)
 
     elif direction and signal_mode == "experimental":
         # Hạng mục thử nghiệm - dùng thẳng SL/TP đã tính, KHÔNG áp công thức ATR*2 của trend
@@ -1315,13 +1582,21 @@ def format_message(sig, win_stats=None, active_trades=None):
 
         if sig.get("signal_mode") == "mean_reversion":
             lines.append(f"{icon} {sig['direction']}  🔁 MEAN-REVERSION (sideway, target gần)")
+        elif sig.get("signal_mode") == "zone_setup":
+            lines.append(f"{icon} {sig['direction']}  🎯 ZONE SETUP ({sig.get('tier_label', '')})")
+            vol_hint = "NHỎ HƠN bình thường (2 nguồn)" if sig.get("zone_stars") == "⭐" else "bình thường (3+ nguồn)"
+            lines.append(f"   Nguồn: {'+'.join(sig.get('zone_sources', []))}{sig.get('zone_stars', '')}  "
+                          f"|  Khối lượng: {vol_hint}")
         elif sig.get("signal_mode") == "experimental":
             lines.append(f"{icon} {sig['direction']}  🧪 THỬ NGHIỆM (rủi ro cao hơn, CHƯA kiểm chứng)")
             lines.append("   ⚠️ Khuyến nghị khối lượng NHỎ HƠN NHIỀU bình thường (vd: 0.3-0.5% thay vì 1-2%)")
         else:
             lines.append(f"{icon} {sig['direction']}")
 
-        if sig.get("chase_warning"):
+        if sig.get("signal_mode") == "zone_setup" and sig.get("entry_zone"):
+            zlow, zhigh = sig["entry_zone"]
+            lines.append(f"📍 Entry: {zlow:.2f}-{zhigh:.2f}")
+        elif sig.get("chase_warning"):
             cw = sig["chase_warning"]
             lines.append(f"⏳ Giá xa OB {cw['distance_atr']}x ATR - CHỜ GIÁ VỀ, không đuổi")
             lines.append(f"📍 Entry (limit): {sig['entry']:.2f}")
@@ -1329,6 +1604,19 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"📍 Entry (market): {sig['entry']:.2f}")
 
         lines.append(f"🛑 SL: {sig['sl']:.2f}   ✅ TP: {sig['tp1']:.2f} / {sig['tp2']:.2f} / {sig['tp3']:.2f}")
+        if sig.get("rr"):
+            lines.append(f"📐 R:R ~1:{sig['rr']}")
+
+        if sig.get("stack_note"):
+            prefix = "✅" if sig.get("stack_appended") else "🚫"
+            lines.append(f"{prefix} {sig['stack_note']}")
+
+        if sig.get("zone_setup_secondary"):
+            s = sig["zone_setup_secondary"]
+            szlow, szhigh = s["entry_zone"]
+            s_icon = "🟢" if s["direction"] == "BUY" else "🔴"
+            lines.append(f"➕ Đồng thời: {s_icon} {s['direction']} tại {szlow:.2f}-{szhigh:.2f} "
+                          f"({s['tier_label']}) SL {s['sl']:.2f} TP {s['tp1']:.2f} R:R~1:{s['rr']}")
 
     # ---------- TRƯỜNG HỢP KHÔNG CÓ TÍN HIỆU: rút gọn tối đa ----------
     else:
@@ -1352,14 +1640,19 @@ def format_message(sig, win_stats=None, active_trades=None):
         if sig.get("zones_below"):
             lines.append("   🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
 
-    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn ----------
+    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn (kèm pips + hòa vốn) ----------
     if win_stats:
         def _stat_txt(s):
-            return f"{s['wins']}W/{s['losses']}L ({s['win_rate']}%)" if s else "chưa đủ dữ liệu"
+            if not s:
+                return "chưa đủ dữ liệu"
+            be_txt = f"/{s['breakevens']}BE" if s.get("breakevens") else ""
+            pips_txt = f" {'+' if s['total_pips'] >= 0 else ''}{s['total_pips']}p"
+            return f"{s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){pips_txt}"
 
         lines.append(f"🎯 🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
         lines.append(f"   🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
         lines.append(f"   🔁 Mean-Reversion: {_stat_txt(win_stats.get('mean_reversion'))}")
+        lines.append(f"   🎯 Zone Setup: {_stat_txt(win_stats.get('zone_setup'))}")
         lines.append(f"   🧪 Thử nghiệm: {_stat_txt(win_stats.get('experimental'))}")
 
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
@@ -1386,21 +1679,32 @@ if __name__ == "__main__":
         print("Thị trường XAU/USD đang đóng cửa cuối tuần -> bỏ qua lần chạy này (không gọi API, không gửi Telegram).")
         exit(0)
 
-    print("Đang lấy dữ liệu và phân tích...")
-    signal = generate_signal()
-
-    # --- Cập nhật kết quả các tín hiệu cũ, tính danh sách lệnh đang hoạt động TRƯỚC khi thêm tín hiệu mới ---
-    # (tránh lặp lại chính tín hiệu vừa tạo - nó đã hiển thị đầy đủ ở phần trên tin nhắn rồi)
+    # Load log TRƯỚC để biết Zone Setup nào đang hoạt động (tránh tạo trùng chiều mỗi 5 phút)
     log = load_signal_log()
-    log = update_signal_outcomes(log, signal["price"])
-    active_trades = active_trades_summary(log)
+    active_zone_dirs = active_zone_setup_directions(log)
 
-    log = append_signal(log, signal)
+    print("Đang lấy dữ liệu và phân tích...")
+    signal = generate_signal(active_zone_directions=active_zone_dirs)
+
+    # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
+    log = update_signal_outcomes(log, signal["price"])
+
+    # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
+    log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
+    signal["stack_note"] = stack_note
+    signal["stack_appended"] = should_append
+
+    active_trades = active_trades_summary(log, current_price=signal["price"])
+
+    if should_append:
+        log = append_signal(log, signal)
+    log = append_zone_setup_secondary(log, signal)  # ghi thêm setup thứ 2 nếu cả BUY+SELL cùng xác nhận
     save_signal_log(log)
     win_stats = {
         "trend_normal": compute_win_rate(log, mode="trend", confidence="normal"),
         "trend_low": compute_win_rate(log, mode="trend", confidence="low"),
         "mean_reversion": compute_win_rate(log, mode="mean_reversion"),
+        "zone_setup": compute_win_rate(log, mode="zone_setup"),
         "experimental": compute_win_rate(log, mode="experimental"),
     }
 
