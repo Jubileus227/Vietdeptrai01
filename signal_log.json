@@ -184,6 +184,20 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
+    "status": "breakeven",
+    "timeout_hours": 4,
+    "pips": 0.0
+  },
+  {
+    "time_iso": "2026-07-03T16:10:38.861249+00:00",
+    "direction": "SELL",
+    "entry": 4163.92903,
+    "sl": 4167.461384923838,
+    "tp1": 4156.864320152326,
+    "score": -5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
     "status": "pending",
     "timeout_hours": 4
   }
