@@ -257,5 +257,18 @@
     "status": "loss",
     "timeout_hours": 4,
     "pips": -258.5
+  },
+  {
+    "time_iso": "2026-07-03T17:05:23.828971+00:00",
+    "direction": "SELL",
+    "entry": 4175.0072,
+    "sl": 4177.757541917656,
+    "tp1": 4169.29358,
+    "score": 3,
+    "mode": "mean_reversion",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending",
+    "timeout_hours": 4
   }
 ]
