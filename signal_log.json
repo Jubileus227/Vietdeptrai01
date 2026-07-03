@@ -34,5 +34,17 @@
     "confidence": "normal",
     "entry_type": "market",
     "status": "pending"
+  },
+  {
+    "time_iso": "2026-07-03T11:20:43.570512+00:00",
+    "direction": "BUY",
+    "entry": 4183.87494,
+    "sl": 4179.1828779485395,
+    "tp1": 4193.25906410292,
+    "score": 5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending"
   }
 ]
