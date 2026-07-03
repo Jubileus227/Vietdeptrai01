@@ -156,8 +156,9 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "pips": -563.2
   },
   {
     "time_iso": "2026-07-03T13:30:47.491400+00:00",
