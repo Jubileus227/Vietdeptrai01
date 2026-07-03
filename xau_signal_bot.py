@@ -277,6 +277,46 @@ def is_active_session(now_utc=None):
     return hour >= SESSION_START_UTC or hour < SESSION_END_UTC
 
 
+def is_market_closed(now_utc=None):
+    """
+    XAU/USD (vàng, giao dịch theo giờ forex) đóng cửa cuối tuần: khoảng từ
+    21:00 UTC thứ Sáu đến 21:00 UTC Chủ Nhật (giờ đóng/mở chính xác có thể lệch
+    ~1 tiếng tùy sàn, dùng mốc an toàn hơi rộng ra 1 chút để tránh chạy nhầm lúc
+    thị trường vừa đóng/mở, dữ liệu chưa ổn định).
+    Weekday: Monday=0 ... Friday=4, Saturday=5, Sunday=6.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    weekday, hour = now_utc.weekday(), now_utc.hour
+    if weekday == 5:  # Thứ Bảy - luôn đóng cửa
+        return True
+    if weekday == 4 and hour >= 21:  # Thứ Sáu từ 21:00 UTC trở đi
+        return True
+    if weekday == 6 and hour < 21:  # Chủ Nhật trước 21:00 UTC
+        return True
+    return False
+
+
+def trading_hours_elapsed(start, end):
+    """
+    Tính số GIỜ GIAO DỊCH THỰC TẾ trôi qua giữa start và end - KHÔNG tính giờ cuối
+    tuần thị trường đóng cửa. Dùng để hạn mức hết hạn (SIGNAL_TIMEOUT_HOURS) công
+    bằng, tránh 1 lệnh mở chiều Thứ Sáu bị tính "hết hạn oan" chỉ vì cộng dồn luôn
+    48 tiếng cuối tuần thị trường còn chưa mở cửa để giá có cơ hội chạm TP/SL.
+    """
+    if end <= start:
+        return 0.0
+    total_seconds = 0.0
+    cursor = start
+    step = timedelta(minutes=30)  # bước nhỏ để đủ chính xác quanh mốc đóng/mở cửa
+    while cursor < end:
+        next_cursor = min(cursor + step, end)
+        midpoint = cursor + (next_cursor - cursor) / 2
+        if not is_market_closed(midpoint):
+            total_seconds += (next_cursor - cursor).total_seconds()
+        cursor = next_cursor
+    return total_seconds / 3600
+
+
 def check_upcoming_news():
     """
     Kiểm tra tin kinh tế quan trọng (USD, high impact) sắp ra trong NEWS_WARNING_MINUTES phút tới.
@@ -635,7 +675,7 @@ def update_signal_outcomes(log, current_price):
                      (direction == "SELL" and current_price >= entry)
             if filled:
                 rec["status"] = "pending"  # đã khớp -> từ giờ mới bắt đầu tính thắng/thua
-            elif (now - rec_time) > timedelta(hours=SIGNAL_TIMEOUT_HOURS):
+            elif trading_hours_elapsed(rec_time, now) > SIGNAL_TIMEOUT_HOURS:
                 rec["status"] = "expired"  # giá không bao giờ pullback về -> lệnh chưa từng vào, bỏ qua
             continue  # dù khớp hay chưa, vòng lặp này chưa xét thắng/thua
 
@@ -651,7 +691,7 @@ def update_signal_outcomes(log, current_price):
             elif current_price >= rec["sl"]:
                 rec["status"] = "loss"
 
-        if rec["status"] == "pending" and (now - rec_time) > timedelta(hours=SIGNAL_TIMEOUT_HOURS):
+        if rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > SIGNAL_TIMEOUT_HOURS:
             rec["status"] = "expired"
     return log
 
@@ -715,7 +755,7 @@ def active_trades_summary(log, max_count=3):
     for rec in active:
         try:
             rec_time = datetime.fromisoformat(rec["time_iso"])
-            hours_left = max(0, SIGNAL_TIMEOUT_HOURS - (now - rec_time).total_seconds() / 3600)
+            hours_left = max(0, SIGNAL_TIMEOUT_HOURS - trading_hours_elapsed(rec_time, now))
         except Exception:
             hours_left = None
 
@@ -1340,6 +1380,10 @@ def send_telegram(message):
 # 5. CHẠY BOT
 # ============================================================
 if __name__ == "__main__":
+    if is_market_closed():
+        print("Thị trường XAU/USD đang đóng cửa cuối tuần -> bỏ qua lần chạy này (không gọi API, không gửi Telegram).")
+        exit(0)
+
     print("Đang lấy dữ liệu và phân tích...")
     signal = generate_signal()
 
