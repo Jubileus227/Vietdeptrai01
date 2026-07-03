@@ -117,6 +117,18 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
+    "status": "loss"
+  },
+  {
+    "time_iso": "2026-07-03T13:15:27.990114+00:00",
+    "direction": "BUY",
+    "entry": 4166.13614,
+    "sl": 4163.721171217979,
+    "tp1": 4176.18294,
+    "score": -4,
+    "mode": "mean_reversion",
+    "confidence": "normal",
+    "entry_type": "market",
     "status": "pending"
   }
 ]
