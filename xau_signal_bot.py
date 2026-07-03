@@ -726,7 +726,62 @@ def mean_reversion_signal(current_price, sr, rsi_value, atr_value, near_threshol
     }
 
 
-def check_entry_chase(direction, current_price, ob, atr_value, max_atr_distance=2.5):
+def experimental_range_signal(current_price, sr, rsi_value, atr_value, near_threshold=0.4):
+    """
+    Hạng mục THỬ NGHIỆM - RỦI RO CAO HƠN mean-reversion chuẩn.
+    Chỉ kích hoạt khi thị trường THỰC SỰ đứng yên: không đủ điều kiện trend, cũng không đủ
+    điều kiện mean-reversion chuẩn (giá chưa ở sát biên range đủ rõ, RSI chưa đủ cực đoan).
+
+    Điều kiện LỎNG HƠN mean-reversion (near_threshold rộng hơn: 0.4 thay vì 0.25, RSI chỉ
+    cần lệch nhẹ khỏi 50 thay vì phải <=45/>=55) -> bắt được nhiều setup hơn, nhưng vì vậy
+    ĐỘ TIN CẬY THẤP HƠN, CHƯA ĐƯỢC BACKTEST kỹ. Luôn có SL rõ ràng (không phải "cược mù"),
+    nhưng khuyến nghị khối lượng vào lệnh NHỎ HƠN NHIỀU so với các hạng mục khác.
+    Được theo dõi thắng/thua HOÀN TOÀN TÁCH RIÊNG để đánh giá bằng dữ liệu thật, không cảm tính.
+    """
+    support, resistance = sr["support"], sr["resistance"]
+    range_size = resistance - support
+    if range_size <= 0:
+        return None
+
+    position = (current_price - support) / range_size
+    mid = (support + resistance) / 2
+
+    direction = None
+    if position <= near_threshold and rsi_value <= 50:
+        direction = "BUY"
+    elif position >= (1 - near_threshold) and rsi_value >= 50:
+        direction = "SELL"
+
+    if not direction:
+        return None
+
+    # SL chặt hơn mean-reversion chuẩn (rủi ro cao hơn thì phải kiểm soát chặt hơn, không phải lỏng hơn)
+    sl_distance = max(atr_value * 1.0, range_size * 0.15)
+    if direction == "BUY":
+        sl = current_price - sl_distance
+        tp1 = mid
+    else:
+        sl = current_price + sl_distance
+        tp1 = mid
+
+    if abs(tp1 - current_price) < atr_value * 0.3:
+        return None  # target quá gần, không đáng vào lệnh sau khi trừ phí
+
+    tp1_dist = abs(tp1 - current_price)
+    if direction == "BUY":
+        tp2 = current_price + tp1_dist * 1.3
+        tp3 = current_price + tp1_dist * 1.6
+    else:
+        tp2 = current_price - tp1_dist * 1.3
+        tp3 = current_price - tp1_dist * 1.6
+
+    return {
+        "direction": direction, "entry": current_price, "sl": sl,
+        "tp1": tp1, "tp2": tp2, "tp3": tp3, "position_in_range": round(position, 2),
+    }
+
+
+
     """
     Kiểm tra giá hiện tại đã chạy quá xa vùng Order Block chưa (nguy cơ "mua đuổi/bán đuổi").
     Nếu quá xa (>= max_atr_distance x ATR), trả về gợi ý entry CHỜ (limit) tại biên gần
@@ -925,6 +980,17 @@ def generate_signal():
         direction = None
         block_reason = "Thị trường đi ngang (ADX thấp) và điểm số cũng chưa đủ ngưỡng"
 
+    # --- Hạng mục THỬ NGHIỆM (rủi ro cao hơn) - chỉ kích hoạt khi thị trường THỰC SỰ đứng yên:
+    # không có trend, không có mean-reversion chuẩn. Đây là lúc bot vốn sẽ hoàn toàn im lặng.
+    # Không kích hoạt nếu sắp có tin (rủi ro chồng rủi ro, không hợp lý dù là "thử nghiệm").
+    exp = None
+    if is_sideway and not mr and not trend_direction and not news_warning:
+        exp = experimental_range_signal(current_price, sr, rsi_m5, atr_m5)
+        if exp:
+            direction = exp["direction"]
+            signal_mode = "experimental"
+            block_reason = None
+
     if direction and news_warning:
         # KẾT HỢP: không còn chặn hẳn khi sắp có tin - vẫn đưa lệnh nhưng cảnh báo rõ rủi ro
         confidence = "low"
@@ -1025,6 +1091,15 @@ def generate_signal():
         })
         result["fib_note"] = fib_confluence_note(fib, mr["entry"], mr["sl"], mr["tp1"], atr_m5)
 
+    elif direction and signal_mode == "experimental":
+        # Hạng mục thử nghiệm - dùng thẳng SL/TP đã tính, KHÔNG áp công thức ATR*2 của trend
+        # (SL chặt hơn vì rủi ro/độ tin cậy chưa kiểm chứng, nên phải kiểm soát chặt)
+        result.update({
+            "entry": exp["entry"], "sl": exp["sl"],
+            "tp1": exp["tp1"], "tp2": exp["tp2"], "tp3": exp["tp3"],
+        })
+        result["fib_note"] = fib_confluence_note(fib, exp["entry"], exp["sl"], exp["tp1"], atr_m5)
+
     elif direction:
         # Kiểm tra giá hiện tại đã chạy quá xa vùng OB chưa -> tránh khuyến nghị mua/bán đuổi
         chase = check_entry_chase(direction, current_price, ob, atr_m5)
@@ -1120,6 +1195,9 @@ def format_message(sig, win_stats=None, active_trades=None):
 
         if sig.get("signal_mode") == "mean_reversion":
             lines.append(f"{icon} {sig['direction']}  🔁 MEAN-REVERSION (sideway, target gần)")
+        elif sig.get("signal_mode") == "experimental":
+            lines.append(f"{icon} {sig['direction']}  🧪 THỬ NGHIỆM (rủi ro cao hơn, CHƯA kiểm chứng)")
+            lines.append("   ⚠️ Khuyến nghị khối lượng NHỎ HƠN NHIỀU bình thường (vd: 0.3-0.5% thay vì 1-2%)")
         else:
             lines.append(f"{icon} {sig['direction']}")
 
@@ -1162,6 +1240,7 @@ def format_message(sig, win_stats=None, active_trades=None):
         lines.append(f"🎯 🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
         lines.append(f"   🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
         lines.append(f"   🔁 Mean-Reversion: {_stat_txt(win_stats.get('mean_reversion'))}")
+        lines.append(f"   🧪 Thử nghiệm: {_stat_txt(win_stats.get('experimental'))}")
 
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
 
@@ -1198,6 +1277,7 @@ if __name__ == "__main__":
         "trend_normal": compute_win_rate(log, mode="trend", confidence="normal"),
         "trend_low": compute_win_rate(log, mode="trend", confidence="low"),
         "mean_reversion": compute_win_rate(log, mode="mean_reversion"),
+        "experimental": compute_win_rate(log, mode="experimental"),
     }
 
     message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
