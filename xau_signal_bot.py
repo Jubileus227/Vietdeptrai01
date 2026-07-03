@@ -592,6 +592,8 @@ def refresh_htf_cache_if_needed():
         "updated_at": now.isoformat(),
         "h1_levels": [{"price": lv["price"], "type": lv["type"]} for lv in h1_levels],
         "h4_levels": [{"price": lv["price"], "type": lv["type"]} for lv in h4_levels],
+        "atr_h1": round(float(atr(df_h1).iloc[-1]), 3),   # dùng làm SL cho Zone Setup có nguồn H1
+        "atr_h4": round(float(atr(df_h4).iloc[-1]), 3),   # dùng làm SL cho Zone Setup có nguồn H4
     }
     save_htf_cache(new_cache)
     return new_cache
@@ -871,7 +873,7 @@ def experimental_range_signal(current_price, sr, rsi_value, atr_value, near_thre
     }
 
 
-
+def check_entry_chase(direction, current_price, ob, atr_value, max_atr_distance=2.5):
     """
     Kiểm tra giá hiện tại đã chạy quá xa vùng Order Block chưa (nguy cơ "mua đuổi/bán đuổi").
     Nếu quá xa (>= max_atr_distance x ATR), trả về gợi ý entry CHỜ (limit) tại biên gần
