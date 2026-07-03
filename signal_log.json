@@ -81,7 +81,7 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-03T13:00:50.076412+00:00",
@@ -93,7 +93,7 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending"
+    "status": "loss"
   },
   {
     "time_iso": "2026-07-03T13:05:25.297884+00:00",
@@ -102,6 +102,18 @@
     "sl": 4170.597225171866,
     "tp1": 4179.478255,
     "score": -3,
+    "mode": "mean_reversion",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "loss"
+  },
+  {
+    "time_iso": "2026-07-03T13:10:38.310985+00:00",
+    "direction": "BUY",
+    "entry": 4169.28904,
+    "sl": 4166.424824482284,
+    "tp1": 4177.483695,
+    "score": -4,
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
