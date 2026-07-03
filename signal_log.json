@@ -9,7 +9,7 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending"
+    "status": "win"
   },
   {
     "time_iso": "2026-07-03T10:55:27.411494+00:00",
@@ -21,7 +21,7 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending"
+    "status": "win"
   },
   {
     "time_iso": "2026-07-03T11:00:46.376974+00:00",
@@ -33,7 +33,7 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending"
+    "status": "win"
   },
   {
     "time_iso": "2026-07-03T11:20:43.570512+00:00",
@@ -41,6 +41,18 @@
     "entry": 4183.87494,
     "sl": 4179.1828779485395,
     "tp1": 4193.25906410292,
+    "score": 5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending"
+  },
+  {
+    "time_iso": "2026-07-03T11:25:28.197226+00:00",
+    "direction": "BUY",
+    "entry": 4186.24291,
+    "sl": 4181.545952222068,
+    "tp1": 4195.636825555865,
     "score": 5,
     "mode": "trend",
     "confidence": "normal",
