@@ -413,6 +413,118 @@ def fib_confluence_note(fib, entry, sl, tp1, atr_value, tolerance_mult=0.5):
     return "; ".join(notes) if notes else None
 
 
+# ============================================================
+# 2c. MỨC GIÁ H1/H4 LỊCH SỬ (đỉnh/đáy cũ vẫn còn "phản ứng")
+# ============================================================
+# Ý tưởng: đỉnh/đáy nổi bật (swing high/low) trên khung H1/H4 thường vẫn là vùng
+# giá thị trường "nhớ" và phản ứng lại nhiều ngày/tuần sau, kể cả khi không còn
+# hỗ trợ/kháng cự nào khác gần đó. H1 thường còn hiệu lực ~1 tuần, H4 ~1 tháng.
+# Chỉ tính lại mỗi giờ (cache) để không tốn thêm request mỗi lần chạy (5 phút/lần).
+
+HTF_CACHE_PATH = "htf_levels_cache.json"
+HTF_CACHE_MAX_AGE_MINUTES = 60  # chỉ tải lại dữ liệu H1/H4 mỗi 60 phút
+
+
+def find_swing_levels(df, left=2, right=2):
+    """Tìm đỉnh/đáy 'swing' (fractal) - cao/thấp hơn hẳn các nến lân cận 2 bên."""
+    levels = []
+    n = len(df)
+    for i in range(left, n - right):
+        window_high = df["high"].iloc[i - left:i + right + 1]
+        window_low = df["low"].iloc[i - left:i + right + 1]
+        candle = df.iloc[i]
+        if candle["high"] == window_high.max():
+            levels.append({"price": float(candle["high"]), "type": "high", "idx": i})
+        if candle["low"] == window_low.min():
+            levels.append({"price": float(candle["low"]), "type": "low", "idx": i})
+    return levels
+
+
+def filter_unbroken_levels(df, levels):
+    """Chỉ giữ lại mức CHƯA bị giá đóng cửa phá vỡ sau khi hình thành (còn 'nguyên vẹn')."""
+    unbroken = []
+    for lv in levels:
+        after = df.iloc[lv["idx"] + 1:]
+        if len(after) == 0:
+            unbroken.append(lv)  # vừa hình thành, chưa có nến nào sau để kiểm tra phá vỡ
+            continue
+        if lv["type"] == "high":
+            broken = (after["close"] > lv["price"]).any()
+        else:
+            broken = (after["close"] < lv["price"]).any()
+        if not broken:
+            unbroken.append(lv)
+    return unbroken
+
+
+def load_htf_cache():
+    if not os.path.exists(HTF_CACHE_PATH):
+        return None
+    try:
+        with open(HTF_CACHE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_htf_cache(cache):
+    with open(HTF_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def refresh_htf_cache_if_needed():
+    """
+    Chỉ tải lại dữ liệu H1 (~1 tuần) + H4 (~1 tháng) nếu cache đã cũ hơn 60 phút.
+    Tốn thêm 2 request MỖI GIỜ (không phải mỗi lần chạy) - vẫn an toàn trong hạn mức free.
+    Nếu lỗi mạng, dùng lại cache cũ (nếu có) thay vì làm crash cả bot.
+    """
+    cache = load_htf_cache()
+    now = datetime.now(timezone.utc)
+
+    if cache:
+        try:
+            updated_at = datetime.fromisoformat(cache["updated_at"])
+            if (now - updated_at).total_seconds() / 60 < HTF_CACHE_MAX_AGE_MINUTES:
+                return cache  # cache còn mới, dùng lại luôn
+        except Exception:
+            pass
+
+    try:
+        df_h1 = get_ohlc("1h", outputsize=170)   # ~1 tuần
+        df_h4 = get_ohlc("4h", outputsize=190)   # ~1 tháng
+    except Exception:
+        return cache  # lỗi mạng -> dùng cache cũ nếu có, không crash
+
+    h1_levels = filter_unbroken_levels(df_h1, find_swing_levels(df_h1))
+    h4_levels = filter_unbroken_levels(df_h4, find_swing_levels(df_h4))
+
+    new_cache = {
+        "updated_at": now.isoformat(),
+        "h1_levels": [{"price": lv["price"], "type": lv["type"]} for lv in h1_levels],
+        "h4_levels": [{"price": lv["price"], "type": lv["type"]} for lv in h4_levels],
+    }
+    save_htf_cache(new_cache)
+    return new_cache
+
+
+def nearest_htf_levels(cache, current_price, atr_value, max_count=2):
+    """Lấy các mức H1/H4 gần giá hiện tại nhất, đủ xa để có ý nghĩa (>=0.3x ATR)."""
+    if not cache or atr_value <= 0:
+        return []
+    all_levels = (
+        [{"price": lv["price"], "type": lv["type"], "tf": "H1"} for lv in cache.get("h1_levels", [])] +
+        [{"price": lv["price"], "type": lv["type"], "tf": "H4"} for lv in cache.get("h4_levels", [])]
+    )
+    result = []
+    for lv in all_levels:
+        dist_atr = abs(current_price - lv["price"]) / atr_value
+        if dist_atr < 0.3:
+            continue
+        result.append({**lv, "distance_atr": round(dist_atr, 1)})
+    result.sort(key=lambda x: x["distance_atr"])
+    return result[:max_count]
+
+
 def detect_fvg(df):
     """
     Fair Value Gap đơn giản: khoảng trống giữa nến[-3] và nến[-1]
@@ -623,12 +735,12 @@ def build_watch_zones(current_price, ob, sr, fib, atr_value):
         zone_low, zone_high = ob["zone"]
         if ob["type"] == "bullish" and current_price > zone_high:
             zones.append({
-                "label": "Order Block (Bullish)", "order_type": "Buy Limit",
+                "label": "Order Block (Bullish)", "tag": "OB", "order_type": "Buy Limit",
                 "price": zone_high, "distance_atr": round((current_price - zone_high) / atr_value, 1),
             })
         elif ob["type"] == "bearish" and current_price < zone_low:
             zones.append({
-                "label": "Order Block (Bearish)", "order_type": "Sell Limit",
+                "label": "Order Block (Bearish)", "tag": "OB", "order_type": "Sell Limit",
                 "price": zone_low, "distance_atr": round((zone_low - current_price) / atr_value, 1),
             })
 
@@ -636,12 +748,12 @@ def build_watch_zones(current_price, ob, sr, fib, atr_value):
     if sr:
         if current_price > sr["support"]:
             zones.append({
-                "label": "Hỗ trợ gần nhất", "order_type": "Buy Limit",
+                "label": "Hỗ trợ gần nhất", "tag": "HT", "order_type": "Buy Limit",
                 "price": sr["support"], "distance_atr": round((current_price - sr["support"]) / atr_value, 1),
             })
         if current_price < sr["resistance"]:
             zones.append({
-                "label": "Kháng cự gần nhất", "order_type": "Sell Limit",
+                "label": "Kháng cự gần nhất", "tag": "KC", "order_type": "Sell Limit",
                 "price": sr["resistance"], "distance_atr": round((sr["resistance"] - current_price) / atr_value, 1),
             })
 
@@ -650,12 +762,12 @@ def build_watch_zones(current_price, ob, sr, fib, atr_value):
         fib_618 = fib["levels"]["61.8"]
         if fib["uptrend_leg"] and current_price > fib_618:
             zones.append({
-                "label": "Fib 61.8% (retracement)", "order_type": "Buy Limit",
+                "label": "Fib 61.8% (retracement)", "tag": "Fib", "order_type": "Buy Limit",
                 "price": fib_618, "distance_atr": round((current_price - fib_618) / atr_value, 1),
             })
         elif not fib["uptrend_leg"] and current_price < fib_618:
             zones.append({
-                "label": "Fib 61.8% (retracement)", "order_type": "Sell Limit",
+                "label": "Fib 61.8% (retracement)", "tag": "Fib", "order_type": "Sell Limit",
                 "price": fib_618, "distance_atr": round((fib_618 - current_price) / atr_value, 1),
             })
 
@@ -791,6 +903,22 @@ def generate_signal():
 
     overview = "; ".join(notes) + "."
 
+    # Cache mức giá H1/H4 lịch sử - chỉ tải lại mỗi giờ, không tốn request mỗi lần chạy
+    htf_cache = refresh_htf_cache_if_needed()
+    htf_levels = nearest_htf_levels(htf_cache, current_price, atr_m5, max_count=6)
+
+    all_zones = build_watch_zones(current_price, ob, sr, fib, atr_m5)
+    for lv in htf_levels:
+        all_zones.append({
+            "label": f"đỉnh/đáy cũ", "tag": lv["tf"],
+            "order_type": "Sell Limit" if lv["type"] == "high" else "Buy Limit",
+            "price": lv["price"], "distance_atr": lv["distance_atr"],
+        })
+
+    # Tách theo TRÊN (Sell Limit - giá phải tăng lên mới chạm) và DƯỚI (Buy Limit - giá phải giảm về)
+    zones_above = sorted([z for z in all_zones if z["price"] > current_price], key=lambda z: z["distance_atr"])[:3]
+    zones_below = sorted([z for z in all_zones if z["price"] < current_price], key=lambda z: z["distance_atr"])[:3]
+
     result = {
         "time": datetime.now().strftime("%H:%M:%S %d/%m"),
         "price": current_price,
@@ -821,7 +949,8 @@ def generate_signal():
         "signal_mode": signal_mode,
         "entry_type": "market",
         "chase_warning": None,
-        "watch_zones": build_watch_zones(current_price, ob, sr, fib, atr_m5),
+        "zones_above": zones_above,
+        "zones_below": zones_below,
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -869,116 +998,99 @@ def generate_signal():
 # 4. FORMAT TIN NHẮN & GỬI TELEGRAM
 # ============================================================
 def format_message(sig, win_stats=None):
+    """
+    2 kiểu tin nhắn:
+    - CÓ tín hiệu (BUY/SELL): đầy đủ chi tiết kỹ thuật, vì đây là lúc cần đủ thông tin để quyết định.
+    - KHÔNG có tín hiệu (đa số các lần chạy): RÚT GỌN mạnh - chỉ giá, điểm, lý do ngắn gọn,
+      vùng theo dõi. Bỏ hết phần liệt kê chỉ báo chi tiết vì không có gì để hành động lúc đó.
+    """
     trend_icon = lambda t: "⬆️" if t == "up" else "⬇️"
-    trend_label = lambda t: "Tăng" if t == "up" else "Giảm"
-
     icon = "🟢" if sig["direction"] == "BUY" else ("🔴" if sig["direction"] == "SELL" else "⚪")
 
     lines = []
-    lines.append(f"⚡ SCALP XAU/USD   {sig['time']}")
-    price_line = f"💰 {sig['price']:.2f}"
+    price_line = f"⚡ XAU/USD {sig['price']:.2f}"
     if sig["pct_change"] is not None:
-        price_line += f"   ({sig['pct_change']:+.2f}% /24h)"
+        price_line += f" ({sig['pct_change']:+.2f}%)"
+    price_line += f"   {sig['time']}"
     lines.append(price_line)
-    lines.append(f"📶 Độ mạnh tín hiệu: {sig['strength_10']}/10")
-    lines.append("─────────────────────")
 
-    lines.append("📊 Xu hướng đa khung:")
-    lines.append(f"   M5:{trend_icon(sig['trend_m5'])} {trend_label(sig['trend_m5'])}   "
-                  f"M15:{trend_icon(sig['trend_m15'])} {trend_label(sig['trend_m15'])}   "
-                  f"M30:{trend_icon(sig['trend_m30'])} {trend_label(sig['trend_m30'])}")
-
-    if sig["ob"]:
-        z = sig["ob"]["zone"]
-        lines.append(f"🟦 Order Block ({sig['ob']['type']}): {z[0]:.2f}–{z[1]:.2f}")
-    if sig["fvg"]:
-        z = sig["fvg"]["zone"]
-        lines.append(f"📊 FVG ({sig['fvg']['type']}): {z[0]:.2f}–{z[1]:.2f}")
-    if sig["bos"]:
-        lines.append(f"🔀 BOS: vừa phá {'đỉnh' if sig['bos']=='up' else 'đáy'} gần nhất (M5)")
-    if sig["pattern"] != "none":
-        lines.append(f"🕯️ Mẫu nến M5: {sig['pattern']}")
-    if sig.get("inside_bar"):
-        ib = sig["inside_bar"]
-        rej = []
-        if ib["touched_high"]: rej.append("chạm đỉnh")
-        if ib["touched_low"]: rej.append("chạm đáy")
-        rej_txt = f", đã {'/'.join(rej)}" if rej else ""
-        bo_txt = {"up": "ĐÃ BREAKOUT LÊN ✅", "down": "ĐÃ BREAKOUT XUỐNG ✅", None: "chưa breakout, đang chờ"}[ib["breakout"]]
-        lines.append(f"📦 Inside Bar (M15): {ib['num_inside_bars']} nến con trong "
-                      f"{ib['mother_low']:.2f}–{ib['mother_high']:.2f}{rej_txt} — {bo_txt}")
-
-    lines.append(f"📈 RSI(14): {sig['rsi']:.1f}   |   ATR(14): {sig['atr']:.2f}   |   ADX(M15): {sig['adx']:.1f}")
-    lines.append(f"🧱 Hỗ trợ: {sig['support']:.2f}   |   Kháng cự: {sig['resistance']:.2f}")
-    if sig.get("fib"):
-        lv = sig["fib"]["levels"]
-        lines.append(f"🔢 Fib (M30, {'sóng tăng' if sig['fib']['uptrend_leg'] else 'sóng giảm'}): "
-                      f"38.2%={lv['38.2']:.2f}  50%={lv['50.0']:.2f}  61.8%={lv['61.8']:.2f}  "
-                      f"| Ext 161.8%={lv['ext_161.8']:.2f}")
-    if sig.get("fib_note"):
-        lines.append(f"✨ Đồng thuận Fib: {sig['fib_note']}")
-    lines.append(f"🕐 Phiên thanh khoản cao: {'Có' if sig['session_ok'] else 'Không'}")
-    if sig["liquidity_note"]:
-        lines.append(f"⚠️ {sig['liquidity_note']}")
-    if sig["news_warning"]:
-        lines.append(f"📰 Cảnh báo tin: {sig['news_warning']}")
-
-    lines.append("─────────────────────")
-    lines.append(f"📐 Điểm tổng hợp: {sig['score']} / ±8")
-    lines.append(f"🧠 Nhận định: {sig['overview']}")
-
+    # ---------- TRƯỜNG HỢP CÓ TÍN HIỆU: hiện đầy đủ chi tiết ----------
     if sig["direction"]:
-        lines.append("")
+        lines.append(f"📶 Độ mạnh: {sig['strength_10']}/10   |   Điểm: {sig['score']}/±8")
+        lines.append(f"📊 M5:{trend_icon(sig['trend_m5'])} M15:{trend_icon(sig['trend_m15'])} "
+                      f"M30:{trend_icon(sig['trend_m30'])}   RSI:{sig['rsi']:.0f} ADX:{sig['adx']:.0f}")
+
+        details = []
+        if sig["ob"]:
+            z = sig["ob"]["zone"]
+            details.append(f"🟦 OB({sig['ob']['type']}): {z[0]:.2f}–{z[1]:.2f}")
+        if sig["fvg"]:
+            z = sig["fvg"]["zone"]
+            details.append(f"📊 FVG: {z[0]:.2f}–{z[1]:.2f}")
+        if sig["bos"]:
+            details.append(f"🔀 BOS: phá {'đỉnh' if sig['bos']=='up' else 'đáy'}")
+        if sig["pattern"] != "none":
+            details.append(f"🕯️ {sig['pattern']}")
+        if sig.get("inside_bar") and sig["inside_bar"]["breakout"]:
+            ib = sig["inside_bar"]
+            details.append(f"📦 Inside Bar breakout {'lên' if ib['breakout']=='up' else 'xuống'} "
+                            f"({ib['mother_low']:.2f}–{ib['mother_high']:.2f})")
+        if details:
+            lines.append("   ".join(details))
+
+        if sig.get("fib_note"):
+            lines.append(f"✨ {sig['fib_note']}")
+        if sig["liquidity_note"]:
+            lines.append(f"⚠️ Thanh khoản thấp (ngoài phiên chính)")
+        if sig["news_warning"]:
+            lines.append(f"📰 Sắp có tin: {sig['news_warning']}")
+
+        lines.append(f"🧠 {sig['overview']}")
+        lines.append("─────────────────────")
+
         if sig.get("signal_mode") == "mean_reversion":
-            lines.append(f"{icon} {sig['direction']}   🔁 MEAN-REVERSION (thị trường sideway)")
-            lines.append("   ⚠️ Chiến lược đánh biên range, KHÁC với trend-following thông thường —")
-            lines.append("   target gần hơn, phù hợp lúc thị trường không có xu hướng rõ.")
+            lines.append(f"{icon} {sig['direction']}  🔁 MEAN-REVERSION (sideway, target gần)")
         else:
             lines.append(f"{icon} {sig['direction']}")
 
         if sig.get("chase_warning"):
             cw = sig["chase_warning"]
-            lines.append(f"   ⏳ Giá đã chạy {cw['distance_atr']}x ATR khỏi vùng OB — CHỜ GIÁ VỀ, không mua/bán đuổi")
-            lines.append(f"📍 Entry (chờ, limit): {sig['entry']:.2f}")
+            lines.append(f"⏳ Giá xa OB {cw['distance_atr']}x ATR - CHỜ GIÁ VỀ, không đuổi")
+            lines.append(f"📍 Entry (limit): {sig['entry']:.2f}")
         else:
-            lines.append(f"📍 Entry (vào ngay, market): {sig['entry']:.2f}")
+            lines.append(f"📍 Entry (market): {sig['entry']:.2f}")
 
-        lines.append(f"🛑 SL: {sig['sl']:.2f}")
-        lines.append(f"✅ TP: {sig['tp1']:.2f} / {sig['tp2']:.2f} / {sig['tp3']:.2f}")
-    elif sig["block_reason"]:
-        lines.append("")
-        lines.append(f"⚪ {sig['block_reason']}")
+        lines.append(f"🛑 SL: {sig['sl']:.2f}   ✅ TP: {sig['tp1']:.2f} / {sig['tp2']:.2f} / {sig['tp3']:.2f}")
+
+    # ---------- TRƯỜNG HỢP KHÔNG CÓ TÍN HIỆU: rút gọn tối đa ----------
     else:
-        lines.append("")
-        lines.append("⚪ Chưa đủ tín hiệu rõ ràng để vào lệnh lúc này")
+        lines.append(f"📶 Điểm: {sig['score']}/±8   |   ADX: {sig['adx']:.0f}")
+        reason = sig["block_reason"] if sig["block_reason"] else "Chưa đủ điều kiện vào lệnh"
+        lines.append(f"⚪ {reason}")
 
-    if not sig["direction"] and sig.get("watch_zones"):
-        lines.append("")
-        lines.append("📋 Vùng theo dõi (tham khảo đặt lệnh chờ, KHÔNG phải khuyến nghị vào ngay):")
-        for z in sig["watch_zones"]:
-            lines.append(f"   • {z['label']}: {z['order_type']} @ {z['price']:.2f} "
-                          f"(cách {z['distance_atr']}x ATR)")
+    # ---------- Vùng theo dõi: LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
+    def _fmt_zone(z):
+        return f"{z['price']:.2f}({z.get('tag', z['label'])})"
 
+    if sig.get("zones_above") or sig.get("zones_below"):
+        lines.append("📋 Vùng theo dõi (đặt lệnh chờ, so với giá hiện tại):")
+        if sig.get("zones_above"):
+            lines.append("   🔼 Trên: " + "  ".join(_fmt_zone(z) for z in sig["zones_above"]))
+        if sig.get("zones_below"):
+            lines.append("   🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
+
+    # ---------- Thống kê thắng/thua: luôn 1 dòng gọn ----------
     if win_stats:
-        lines.append("─────────────────────")
-        lines.append("🎯 Lịch sử tín hiệu (đánh giá riêng từng chiến lược):")
-        trend_stats = win_stats.get("trend")
-        mr_stats = win_stats.get("mean_reversion")
-        if trend_stats:
-            lines.append(f"   📈 Trend: {trend_stats['wins']} thắng / {trend_stats['losses']} thua "
-                          f"({trend_stats['win_rate']}% trên {trend_stats['total']} lệnh)")
-        else:
-            lines.append("   📈 Trend: chưa đủ dữ liệu")
-        if mr_stats:
-            lines.append(f"   🔁 Mean-Reversion: {mr_stats['wins']} thắng / {mr_stats['losses']} thua "
-                          f"({mr_stats['win_rate']}% trên {mr_stats['total']} lệnh)")
-        else:
-            lines.append("   🔁 Mean-Reversion: chưa đủ dữ liệu")
+        t, m = win_stats.get("trend"), win_stats.get("mean_reversion")
+        t_txt = f"{t['wins']}W/{t['losses']}L ({t['win_rate']}%)" if t else "chưa đủ dữ liệu"
+        m_txt = f"{m['wins']}W/{m['losses']}L ({m['win_rate']}%)" if m else "chưa đủ dữ liệu"
+        lines.append(f"🎯 Trend: {t_txt}  |  MR: {m_txt}")
 
-    lines.append("")
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
 
     return "\n".join(lines)
+
+
 
 
 def send_telegram(message):
