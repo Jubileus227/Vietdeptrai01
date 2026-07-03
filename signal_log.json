@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "time_iso": "2026-07-03T10:50:40.007210+00:00",
+    "direction": "BUY",
+    "entry": 4175.7343,
+    "sl": 4171.363528513109,
+    "tp1": 4184.475842973783,
+    "score": 5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending"
+  }
+]
