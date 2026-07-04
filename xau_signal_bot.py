@@ -22,7 +22,15 @@ TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN", "DÁN_TOKEN_BOT_TELEG
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID", "DÁN_CHAT_ID_CỦA_BẠN_VÀO_ĐÂY")
 
 SYMBOL = "XAU/USD"
-RISK_PER_TRADE_PIPS = 200   # khoảng cách SL mặc định (điểm), có thể chỉnh
+# SL của Trend giờ ĐỘNG trong khoảng [SL_MIN_POINTS, SL_MAX_POINTS] theo ATR(M5) hiện tại -
+# ATR càng cao (biến động mạnh) thì SL càng gần mức tối đa, tránh bị "stop-hunt" quét SL
+# trong lúc biến động rồi mới đi đúng hướng (phát hiện qua dữ liệu thật: tỷ lệ hòa vốn cao
+# + nhiều lệnh thua sát entry). ATR_SL_LOW/HIGH là vùng tham chiếu ATR M5 "thấp"/"cao" điển
+# hình của XAU/USD - có thể cần tinh chỉnh lại sau khi có thêm dữ liệu thực tế.
+SL_MIN_POINTS = 10
+SL_MAX_POINTS = 20
+ATR_SL_LOW = 0.5
+ATR_SL_HIGH = 2.5
 SIGNAL_THRESHOLD = 5        # chỉ gửi Telegram khi |điểm tổng hợp| >= giá trị này (đã tối ưu qua backtest sau khi thêm OB+Inside Bar: ngưỡng=5, TP:SL=2.0 cho kỳ vọng dương tốt trên mẫu 48 lệnh)
 
 ADX_MIN = 20                # ADX dưới mức này coi là thị trường đi ngang -> không khuyến nghị vào lệnh
@@ -37,7 +45,8 @@ SIGNAL_LOG_PATH = "signal_log.json"   # file lưu lịch sử tín hiệu để 
 SIGNAL_LOG_MAX = 300                  # số bản ghi tối đa giữ lại trong file log
 SIGNAL_TIMEOUT_HOURS = 4              # sau X giờ chưa chạm TP/SL thì coi là hết hạn, không tính thắng/thua
 
-PIP_SIZE = 0.01                       # quy ước 1 pip XAU/USD = 0.01 (khớp cách hiển thị SL/TP hiện tại)
+LOT_SIZE = 0.05                       # lot cố định mỗi lệnh (số thật, không phải ví dụ)
+USD_PER_POINT = 5.0                   # 0.05 lot XAU/USD -> mỗi $1 giá thay đổi = $5 lãi/lỗ
 MAX_STACK_PER_DIRECTION = 3           # tối đa bao nhiêu lệnh cùng chiều/cùng loại được chạy song song
 MIN_SCORE_IMPROVEMENT_TO_STACK = 2    # điểm mới phải mạnh hơn lệnh đang chạy ít nhất bấy nhiêu mới được "nhồi"
 
@@ -327,7 +336,7 @@ def is_market_flat(df, lookback=12, min_range_ratio=0.0003):
     return range_ratio < min_range_ratio or identical_closes
 
 
-
+def trading_hours_elapsed(start, end):
     """
     Tính số GIỜ GIAO DỊCH THỰC TẾ trôi qua giữa start và end - KHÔNG tính giờ cuối
     tuần thị trường đóng cửa. Dùng để hạn mức hết hạn (SIGNAL_TIMEOUT_HOURS) công
@@ -718,17 +727,17 @@ def update_signal_outcomes(log, current_price):
         if rec["direction"] == "BUY":
             if current_price >= rec["tp1"]:
                 rec["status"] = "win"
-                rec["pips"] = round((rec["tp1"] - rec["entry"]) / PIP_SIZE, 1)
+                rec["usd"] = round((rec["tp1"] - rec["entry"]) * USD_PER_POINT, 2)
             elif current_price <= rec["sl"]:
                 rec["status"] = "loss"
-                rec["pips"] = round((rec["sl"] - rec["entry"]) / PIP_SIZE, 1)  # số âm
+                rec["usd"] = round((rec["sl"] - rec["entry"]) * USD_PER_POINT, 2)  # số âm
         else:  # SELL
             if current_price <= rec["tp1"]:
                 rec["status"] = "win"
-                rec["pips"] = round((rec["entry"] - rec["tp1"]) / PIP_SIZE, 1)
+                rec["usd"] = round((rec["entry"] - rec["tp1"]) * USD_PER_POINT, 2)
             elif current_price >= rec["sl"]:
                 rec["status"] = "loss"
-                rec["pips"] = round((rec["entry"] - rec["sl"]) / PIP_SIZE, 1)  # số âm
+                rec["usd"] = round((rec["entry"] - rec["sl"]) * USD_PER_POINT, 2)  # số âm
 
         if rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > timeout:
             rec["status"] = "expired"
@@ -768,7 +777,7 @@ def manage_active_trades_before_append(log, sig, current_price):
                     (direction == "SELL" and current_price < rec["entry"])
         if favorable:
             rec["status"] = "breakeven"
-            rec["pips"] = 0.0
+            rec["usd"] = 0.0
 
     active = [r for r in active if r["status"] in ("waiting_fill", "pending")]  # cập nhật lại sau hòa vốn
 
@@ -790,10 +799,10 @@ def manage_active_trades_before_append(log, sig, current_price):
         return log, True, note
 
     entry_old = latest_active["entry"]
-    pips_now = round((current_price - entry_old) / PIP_SIZE, 1) if direction == "BUY" \
-        else round((entry_old - current_price) / PIP_SIZE, 1)
+    usd_now = round((current_price - entry_old) * USD_PER_POINT, 2) if direction == "BUY" \
+        else round((entry_old - current_price) * USD_PER_POINT, 2)
     note = (f"Đã có {len(active)} lệnh {direction} ({mode}) đang chạy (gần nhất entry {entry_old:.2f}, "
-            f"hiện {'+' if pips_now >= 0 else ''}{pips_now}p) - điểm mới ({sig['score']}) chưa đủ mạnh hơn "
+            f"hiện {'+' if usd_now >= 0 else ''}${usd_now}) - điểm mới ({sig['score']}) chưa đủ mạnh hơn "
             f"rõ rệt để nhồi thêm, chỉ tham khảo.")
     return log, False, note
 
@@ -857,7 +866,7 @@ def active_zone_setup_directions(log):
 
 def compute_win_rate(log, mode=None, confidence=None):
     """
-    Tính tỷ lệ thắng/thua + tổng số pip + số lệnh hòa vốn. Nếu truyền mode
+    Tính tỷ lệ thắng/thua + tổng $ lãi/lỗ + số lệnh hòa vốn. Nếu truyền mode
     ("trend" hoặc "mean_reversion"...), chỉ tính riêng loại đó. Nếu truyền confidence
     ("normal" hoặc "low"), lọc thêm theo độ tin cậy -> cho phép so sánh tín hiệu
     🟡 THẤP có thực sự kém hơn 🟢 bình thường không.
@@ -872,14 +881,14 @@ def compute_win_rate(log, mode=None, confidence=None):
     breakevens = [r for r in log if r.get("status") == "breakeven"]
     if not closed and not breakevens:
         return None
-    total_pips = round(sum(r.get("pips", 0) for r in closed), 1)
+    total_usd = round(sum(r.get("usd", 0) for r in closed), 2)
     return {
         "wins": len(wins),
         "losses": len(closed) - len(wins),
         "total": len(closed),
         "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else 0.0,
         "breakevens": len(breakevens),
-        "total_pips": total_pips,
+        "total_usd": total_usd,
     }
 
 
@@ -887,7 +896,7 @@ def active_trades_summary(log, current_price=None, max_count=3):
     """
     Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hòa vốn/hết hạn) để nhắc lại mỗi lần chạy -
     tránh trường hợp bạn quên mất 1 lệnh chờ (limit) đang treo, hoặc 1 lệnh đã khớp đang chạy.
-    Nếu truyền current_price, hiện thêm số pip lời/lỗ tạm tính cho lệnh đã khớp.
+    Nếu truyền current_price, hiện thêm số $ lời/lỗ tạm tính cho lệnh đã khớp.
     """
     now = datetime.now(timezone.utc)
     active = [r for r in log if r.get("status") in ("waiting_fill", "pending")]
@@ -907,12 +916,12 @@ def active_trades_summary(log, current_price=None, max_count=3):
             time_txt = f", còn {hours_left:.1f}h" if hours_left is not None else ""
             summary.append(f"{icon} {rec['direction']} Limit @ {rec['entry']:.2f} (chờ khớp{time_txt})")
         else:  # pending - đã khớp, đang chạy chờ TP/SL
-            pips_txt = ""
+            usd_txt = ""
             if current_price is not None:
-                pips_now = (current_price - rec["entry"]) / PIP_SIZE if rec["direction"] == "BUY" \
-                    else (rec["entry"] - current_price) / PIP_SIZE
-                pips_txt = f", {'+' if pips_now >= 0 else ''}{pips_now:.1f}p"
-            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy{pips_txt})")
+                usd_now = (current_price - rec["entry"]) * USD_PER_POINT if rec["direction"] == "BUY" \
+                    else (rec["entry"] - current_price) * USD_PER_POINT
+                usd_txt = f", {'+' if usd_now >= 0 else ''}${usd_now:.2f}"
+            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy{usd_txt})")
 
     return summary
 
@@ -998,6 +1007,89 @@ def has_reaction_candle(df, direction, atr_value):
     return False
 
 
+def dynamic_sl_distance(atr_value, min_sl=SL_MIN_POINTS, max_sl=SL_MAX_POINTS,
+                         atr_low=ATR_SL_LOW, atr_high=ATR_SL_HIGH):
+    """
+    SL động trong khoảng [min_sl, max_sl] theo ATR(M5) hiện tại - ATR càng cao (biến động
+    mạnh) thì SL càng gần max_sl (tránh bị stop-hunt), ATR càng thấp thì càng gần min_sl
+    (không cần SL quá rộng khi thị trường đang yên). Nội suy tuyến tính giữa 2 mốc tham chiếu.
+    """
+    if atr_value <= atr_low:
+        return min_sl
+    if atr_value >= atr_high:
+        return max_sl
+    ratio = (atr_value - atr_low) / (atr_high - atr_low)
+    return min_sl + ratio * (max_sl - min_sl)
+
+
+def rr_profile_for_score(score, threshold, max_score=9):
+    """
+    Xác định hồ sơ R:R (tỷ lệ TP1/TP2/TP3 tính theo R = khoảng cách SL) dựa trên độ mạnh
+    của điểm số Trend - điểm càng gần mức tối đa, thị trường càng mạnh, TP càng đặt xa hơn.
+    Thay thế cho việc dùng ADX (đã bỏ theo yêu cầu) làm thước đo độ mạnh.
+    - Điểm vừa đủ ngưỡng (yếu) -> 0.5R / 0.8R / 1.2R
+    - Điểm ở giữa (trung bình) -> 0.7R / 1.3R / 2.0R
+    - Điểm gần tối đa (mạnh)   -> 1.0R / 2.0R / 3.0R
+    """
+    span = max_score - threshold
+    if span <= 0:
+        return (1.0, 2.0, 3.0)
+    ratio = (abs(score) - threshold) / span  # 0.0 (vừa đủ ngưỡng) -> 1.0 (tối đa)
+    if ratio < 0.34:
+        return (0.5, 0.8, 1.2)
+    elif ratio < 0.67:
+        return (0.7, 1.3, 2.0)
+    return (1.0, 2.0, 3.0)
+
+
+def rr_profile_for_tier(tier):
+    """Zone Setup: dùng luôn 'tuổi thọ' nguồn (short/medium/long) làm hồ sơ R:R, nhất quán
+    với ý tưởng nguồn càng lớn (H4) thì biên độ kỳ vọng càng xa."""
+    return {
+        "short": (0.5, 0.8, 1.2),
+        "medium": (0.7, 1.3, 2.0),
+        "long": (1.0, 2.0, 3.0),
+    }.get(tier, (1.0, 2.0, 3.0))
+
+
+def compute_walled_tps(direction, entry, sl_distance, rr_tuple, zones_same_side):
+    """
+    "Bức tường cản": tính 3 mức TP theo rr_tuple (R-multiple), nhưng mỗi mức tự động bị
+    CHẶN LẠI nếu có 1 vùng cộng hưởng (>=1 sao, tức >=2 nguồn đồng thuận) nằm gần hơn mục
+    tiêu lý thuyết - dùng biên gần của vùng đó làm TP thực tế thay vì phóng xuyên qua.
+    Xử lý TUẦN TỰ: TP sau tìm bức tường TIẾP THEO (không lặp lại đúng bức tường TP trước
+    đã dùng), đảm bảo TP1 <= TP2 <= TP3 (BUY) hoặc TP1 >= TP2 >= TP3 (SELL).
+    zones_same_side: zones_above (nếu BUY) hoặc zones_below (nếu SELL), đã sắp gần->xa.
+    """
+    starred_walls = [z for z in zones_same_side if z.get("stars")]
+    used_wall_idx = 0
+    tps = []
+    prev_price = entry
+    for r in rr_tuple:
+        raw = entry + r * sl_distance if direction == "BUY" else entry - r * sl_distance
+        clamped = raw
+        for i in range(used_wall_idx, len(starred_walls)):
+            w = starred_walls[i]
+            near_edge = w["price_low"] if direction == "BUY" else w["price_high"]
+            in_between = (direction == "BUY" and prev_price < near_edge < raw) or \
+                         (direction == "SELL" and raw < near_edge < prev_price)
+            if in_between:
+                clamped = near_edge
+                used_wall_idx = i + 1  # bức tường này đã "dùng" - TP sau tìm bức tường kế tiếp
+                break
+        tps.append(clamped)
+        prev_price = clamped
+
+    # An toàn: đảm bảo thứ tự TP1/TP2/TP3 không bị đảo lộn sau khi chặn
+    if direction == "BUY":
+        tps[1] = max(tps[1], tps[0])
+        tps[2] = max(tps[2], tps[1])
+    else:
+        tps[1] = min(tps[1], tps[0])
+        tps[2] = min(tps[2], tps[1])
+    return tuple(tps)
+
+
 def zone_tier_info(sources, htf_cache, atr_m5):
     """
     Xác định 'tuổi thọ' của Zone Setup dựa theo nguồn XA NHẤT cấu thành vùng giá -
@@ -1046,16 +1138,21 @@ def build_zone_setup_candidate(direction, zone, current_price, df_m5, atr_m5, ht
     if risk <= 0:
         return None
 
+    # Chỉ dùng vùng đối diện CÓ SAO (đáng tin cậy) làm mục tiêu TP - nhất quán với nguyên tắc
+    # "bức tường cản" chỉ tính vùng cộng hưởng, không dùng vùng đơn lẻ 1 nguồn làm target.
+    starred_opposite = [z for z in opposite_zones if z.get("stars")]
+    r1, r2, r3 = rr_profile_for_tier(tier["tier"])  # fallback theo tuổi thọ nguồn nếu không có vùng đối diện phù hợp
+
     def _opp_price(z):
         return z["price_low"] if direction == "BUY" else z["price_high"]
 
-    tp1 = _opp_price(opposite_zones[0]) if opposite_zones else None
-    if tp1 is None or abs(tp1 - entry) < risk:  # vùng đối diện quá gần/không có -> fallback nhân R
-        tp1 = entry + risk * 2.0 if direction == "BUY" else entry - risk * 2.0
-    tp2 = _opp_price(opposite_zones[1]) if len(opposite_zones) > 1 else \
-        (entry + risk * 3.0 if direction == "BUY" else entry - risk * 3.0)
-    tp3 = _opp_price(opposite_zones[2]) if len(opposite_zones) > 2 else \
-        (entry + risk * 4.0 if direction == "BUY" else entry - risk * 4.0)
+    tp1 = _opp_price(starred_opposite[0]) if starred_opposite else None
+    if tp1 is None or abs(tp1 - entry) < risk:  # vùng đối diện quá gần/không có -> fallback theo hồ sơ R của tier
+        tp1 = entry + risk * r1 if direction == "BUY" else entry - risk * r1
+    tp2 = _opp_price(starred_opposite[1]) if len(starred_opposite) > 1 else \
+        (entry + risk * r2 if direction == "BUY" else entry - risk * r2)
+    tp3 = _opp_price(starred_opposite[2]) if len(starred_opposite) > 2 else \
+        (entry + risk * r3 if direction == "BUY" else entry - risk * r3)
 
     return {
         "direction": direction, "entry": entry, "entry_zone": (zone["price_low"], zone["price_high"]),
@@ -1349,13 +1446,13 @@ def generate_signal(active_zone_directions=None):
     # --- ZONE SETUP: setup THẬT tại vùng đáng tin cậy (>=1 sao, tức >=2 nguồn đồng thuận),
     # CHỈ kích hoạt khi có nến M5 xác nhận phản ứng đủ mạnh ngay tại đó (has_reaction_candle) -
     # đúng phong cách "chờ nến xác nhận" thay vì đặt lệnh chờ mù. Chỉ xét khi Trend và
-    # Mean-Reversion đều không có tín hiệu ("giá đang chạy ở giữa", không phải lúc trend rõ
-    # hay lúc ở biên range). Có thể có ĐỒNG THỜI cả BUY (từ vùng dưới) và SELL (từ vùng trên)
-    # nếu cả 2 cùng xác nhận cùng lúc - không giới hạn chỉ 1 chiều.
+    # Mean-Reversion đều không có tín hiệu. KHÔNG còn yêu cầu ADX/sideway - độ cộng hưởng
+    # (số sao) mới là điều kiện kích hoạt chính, không phải trạng thái xu hướng. Có thể có
+    # ĐỒNG THỜI cả BUY (từ vùng dưới) và SELL (từ vùng trên) nếu cả 2 cùng xác nhận cùng lúc.
     zone_setup_primary = None
     zone_setup_secondary = None
     exp = None
-    if is_sideway and not mr and not trend_direction and not news_warning:
+    if not market_flat and not mr and not trend_direction and not news_warning:
         buy_zone = zones_below[0] if zones_below else None
         sell_zone = zones_above[0] if zones_above else None
 
@@ -1380,8 +1477,9 @@ def generate_signal(active_zone_directions=None):
             direction = zone_setup_primary["direction"]
             signal_mode = "zone_setup"
             block_reason = None
-        else:
-            # Không có Zone Setup nào đủ điều kiện -> fallback THỬ NGHIỆM (lỏng hơn, độ tin cậy thấp hơn)
+        elif is_sideway:
+            # Thử nghiệm GIỮ NGUYÊN phạm vi hẹp cũ (chỉ khi thực sự sideway) - đang lỗ 0/3,
+            # không mở rộng thêm phạm vi kích hoạt của hạng mục này.
             exp = experimental_range_signal(current_price, sr, rsi_m5, atr_m5)
             if exp:
                 direction = exp["direction"]
@@ -1524,26 +1622,28 @@ def generate_signal(active_zone_directions=None):
         entry = chase["suggested_entry"] if chase else current_price
         entry_type = "limit" if chase else "market"
 
-        # Dùng ATR để đặt SL theo biến động thực tế của thị trường (thay vì số pip cố định cứng nhắc)
-        sl_distance = max(atr_m5 * 1.5, RISK_PER_TRADE_PIPS * 0.01 * 0.5)
-        # Tỷ lệ TP:SL = 2.0 -> áp dụng từ kết quả backtest (kỳ vọng dương nhất trên mẫu đủ lớn,
-        # xem run_sweep() trong backtest.py). TP2/TP3 đặt xa hơn TP1 để chốt lời từng phần.
-        tp1_distance = sl_distance * 2.0
+        # SL động trong khoảng [10, 20] theo ATR(M5) - tránh bị stop-hunt quét SL trong
+        # thị trường biến động mạnh (xem dynamic_sl_distance để biết cách nội suy).
+        sl_distance = dynamic_sl_distance(atr_m5)
+
+        # Hồ sơ R:R theo ĐỘ MẠNH điểm số (không dùng ADX nữa) - điểm càng gần mức tối đa,
+        # thị trường càng mạnh, cả bộ TP1/TP2/TP3 càng đặt xa hơn theo tỷ lệ.
+        r1, r2, r3 = rr_profile_for_score(score, SIGNAL_THRESHOLD)
+
+        # "Bức tường cản": mỗi mức TP tự động dừng lại ở biên gần của vùng cộng hưởng (>=1 sao)
+        # nếu vùng đó nằm gần hơn mục tiêu R lý thuyết - tránh phóng TP xuyên qua kháng cự/hỗ trợ
+        # mạnh một cách phi thực tế. Áp dụng cho CẢ 3 mức, xử lý tuần tự (TP sau tìm tường tiếp theo).
+        zones_same_side = zones_above if direction == "BUY" else zones_below
+        tp1, tp2, tp3 = compute_walled_tps(direction, entry, sl_distance, (r1, r2, r3), zones_same_side)
 
         if direction == "BUY":
             sl = entry - sl_distance
-            tp1 = entry + tp1_distance
-            tp2 = entry + tp1_distance * 1.3
-            tp3 = entry + tp1_distance * 1.6
         else:
             sl = entry + sl_distance
-            tp1 = entry - tp1_distance
-            tp2 = entry - tp1_distance * 1.3
-            tp3 = entry - tp1_distance * 1.6
 
         result.update({
             "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-            "entry_type": entry_type, "chase_warning": chase,
+            "entry_type": entry_type, "chase_warning": chase, "rr": r1,
         })
         result["fib_note"] = fib_confluence_note(fib, entry, sl, tp1, atr_m5)
 
@@ -1675,14 +1775,14 @@ def format_message(sig, win_stats=None, active_trades=None):
         if sig.get("zones_below"):
             lines.append("   🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
 
-    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn (kèm pips + hòa vốn) ----------
+    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn (kèm $ lãi/lỗ + hòa vốn) ----------
     if win_stats:
         def _stat_txt(s):
             if not s:
                 return "chưa đủ dữ liệu"
             be_txt = f"/{s['breakevens']}BE" if s.get("breakevens") else ""
-            pips_txt = f" {'+' if s['total_pips'] >= 0 else ''}{s['total_pips']}p"
-            return f"{s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){pips_txt}"
+            usd_txt = f" {'+' if s['total_usd'] >= 0 else ''}${s['total_usd']}"
+            return f"{s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}"
 
         lines.append(f"🎯 🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
         lines.append(f"   🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
