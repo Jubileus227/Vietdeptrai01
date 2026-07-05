@@ -268,7 +268,7 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
+    "status": "expired",
     "timeout_hours": 4
   },
   {
