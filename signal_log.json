@@ -671,7 +671,8 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "win",
+    "timeout_hours": 4,
+    "usd": 70.75
   }
 ]
