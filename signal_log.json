@@ -535,5 +535,18 @@
     "entry_type": "limit",
     "status": "expired",
     "timeout_hours": 4
+  },
+  {
+    "time_iso": "2026-07-06T08:46:29.062871+00:00",
+    "direction": "SELL",
+    "entry": 4163.1504,
+    "sl": 4183.1504,
+    "tp1": 4153.1504,
+    "score": -5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4
   }
 ]
