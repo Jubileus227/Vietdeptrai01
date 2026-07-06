@@ -1715,10 +1715,18 @@ def generate_signal(active_zone_directions=None):
 def format_message(sig, win_stats=None, active_trades=None):
     """
     2 kiểu tin nhắn:
-    - CÓ tín hiệu (BUY/SELL): đầy đủ chi tiết kỹ thuật, vì đây là lúc cần đủ thông tin để quyết định.
-    - KHÔNG có tín hiệu (đa số các lần chạy): RÚT GỌN mạnh - chỉ giá, điểm, lý do ngắn gọn,
-      vùng theo dõi. Bỏ hết phần liệt kê chỉ báo chi tiết vì không có gì để hành động lúc đó.
+    - CÓ tín hiệu (BUY/SELL): đầy đủ chi tiết kỹ thuật, đặt trong khối "🆕 TÍN HIỆU MỚI"
+      có tiêu đề + đường kẻ riêng - tách biệt rõ với "lệnh đang chạy" (khối khác, dễ nhầm
+      nếu đọc lướt).
+    - KHÔNG có tín hiệu (đa số các lần chạy): RÚT GỌN mạnh, không cần khối tiêu đề to.
+    Các khối "Lệnh đang chạy"/"Vùng theo dõi"/"Thống kê" đều có tiêu đề + đường kẻ riêng,
+    và tự ẩn khi không có gì để hiển thị (không hiện khối rỗng).
     """
+    SEP = "━━━━━━━"
+
+    def section_header(emoji, label):
+        return f"{SEP} {emoji} {label} {SEP}"
+
     trend_icon = lambda t: "⬆️" if t == "up" else "⬇️"
     if sig.get("confidence") == "low" and sig["direction"]:
         icon = "🟡"  # vàng = tín hiệu có nhưng độ tin cậy thấp, khác với xanh/đỏ bình thường
@@ -1731,9 +1739,11 @@ def format_message(sig, win_stats=None, active_trades=None):
         price_line += f" ({sig['pct_change']:+.2f}%)"
     price_line += f"   {sig['time']}"
     lines.append(price_line)
+    lines.append("")
 
-    # ---------- TRƯỜNG HỢP CÓ TÍN HIỆU: hiện đầy đủ chi tiết ----------
+    # ---------- TRƯỜNG HỢP CÓ TÍN HIỆU: khối riêng "🆕 TÍN HIỆU MỚI" ----------
     if sig["direction"]:
+        lines.append(section_header("🆕", "TÍN HIỆU MỚI"))
         lines.append(f"📶 Độ mạnh: {sig['strength_10']}/10   |   Điểm: {sig['score']}/±9")
         macd_icon = "⬆️" if sig.get("macd_bias") == "up" else ("⬇️" if sig.get("macd_bias") == "down" else "➖")
         lines.append(f"📊 M5:{trend_icon(sig['trend_m5'])} M15:{trend_icon(sig['trend_m15'])} "
@@ -1814,30 +1824,36 @@ def format_message(sig, win_stats=None, active_trades=None):
             s_icon = "🟢" if s["direction"] == "BUY" else "🔴"
             lines.append(f"➕ Đồng thời: {s_icon} {s['direction']} tại {szlow:.2f}-{szhigh:.2f} "
                           f"({s['tier_label']}) SL {s['sl']:.2f} TP {s['tp1']:.2f} R:R~1:{s['rr']}")
+        lines.append("")
 
-    # ---------- TRƯỜNG HỢP KHÔNG CÓ TÍN HIỆU: rút gọn tối đa ----------
+    # ---------- TRƯỜNG HỢP KHÔNG CÓ TÍN HIỆU: rút gọn tối đa, không cần khối to ----------
     else:
         lines.append(f"📶 Điểm: {sig['score']}/±9   |   ADX: {sig['adx']:.0f}")
         reason = sig["block_reason"] if sig["block_reason"] else "Chưa đủ điều kiện vào lệnh"
         lines.append(f"⚪ {reason}")
+        lines.append("")
 
-    # ---------- Nhắc lại lệnh đang chờ khớp / đang chạy (nếu có) ----------
+    # ---------- Khối "🔄 LỆNH ĐANG CHẠY": chỉ hiện khi có, ẩn hẳn nếu trống ----------
     if active_trades:
-        lines.append("⏳ Lệnh đang theo dõi: " + " | ".join(active_trades))
+        lines.append(section_header("🔄", "LỆNH ĐANG CHẠY"))
+        for t in active_trades:
+            lines.append(t)
+        lines.append("")
 
-    # ---------- Vùng theo dõi: LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
+    # ---------- Khối "📋 VÙNG THEO DÕI": LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
     def _fmt_zone(z):
         tags = "+".join(z["sources"])
         return f"{z['price_low']:.2f}–{z['price_high']:.2f}({tags}{z.get('stars', '')})"
 
     if sig.get("zones_above") or sig.get("zones_below"):
-        lines.append("📋 Vùng theo dõi (đặt lệnh chờ, so với giá hiện tại):")
+        lines.append(section_header("📋", "VÙNG THEO DÕI"))
         if sig.get("zones_above"):
-            lines.append("   🔼 Trên: " + "  ".join(_fmt_zone(z) for z in sig["zones_above"]))
+            lines.append("🔼 Trên: " + "  ".join(_fmt_zone(z) for z in sig["zones_above"]))
         if sig.get("zones_below"):
-            lines.append("   🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
+            lines.append("🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
+        lines.append("")
 
-    # ---------- Thống kê thắng/thua: 3 nhóm, mỗi nhóm 1 dòng gọn (kèm $ lãi/lỗ + hòa vốn) ----------
+    # ---------- Khối "📊 THỐNG KÊ": thắng/thua 3 nhóm, mỗi nhóm 1 dòng gọn (kèm $ + hòa vốn) ----------
     if win_stats:
         def _stat_txt(s):
             if not s:
@@ -1846,11 +1862,13 @@ def format_message(sig, win_stats=None, active_trades=None):
             usd_txt = f" {'+' if s['total_usd'] >= 0 else ''}${s['total_usd']}"
             return f"{s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}"
 
-        lines.append(f"🎯 🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
-        lines.append(f"   🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
-        lines.append(f"   🔁 Mean-Reversion: {_stat_txt(win_stats.get('mean_reversion'))}")
-        lines.append(f"   🎯 Zone Setup: {_stat_txt(win_stats.get('zone_setup'))}")
-        lines.append(f"   🧪 Thử nghiệm: {_stat_txt(win_stats.get('experimental'))}")
+        lines.append(section_header("📊", "THỐNG KÊ"))
+        lines.append(f"🟢 Trend bình thường: {_stat_txt(win_stats.get('trend_normal'))}")
+        lines.append(f"🟡 Trend độ tin cậy thấp: {_stat_txt(win_stats.get('trend_low'))}")
+        lines.append(f"🔁 Mean-Reversion: {_stat_txt(win_stats.get('mean_reversion'))}")
+        lines.append(f"🎯 Zone Setup: {_stat_txt(win_stats.get('zone_setup'))}")
+        lines.append(f"🧪 Thử nghiệm: {_stat_txt(win_stats.get('experimental'))}")
+        lines.append("")
 
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
 
