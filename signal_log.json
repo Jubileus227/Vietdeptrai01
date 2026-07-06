@@ -449,6 +449,20 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
+    "status": "breakeven",
+    "timeout_hours": 4,
+    "usd": 0.0
+  },
+  {
+    "time_iso": "2026-07-06T01:50:44.784427+00:00",
+    "direction": "BUY",
+    "entry": 4200.96616,
+    "sl": 4180.96616,
+    "tp1": 4210.96616,
+    "score": 6,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
     "status": "pending",
     "timeout_hours": 4
   }
