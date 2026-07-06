@@ -674,5 +674,18 @@
     "status": "win",
     "timeout_hours": 4,
     "usd": 70.75
+  },
+  {
+    "time_iso": "2026-07-06T13:20:52.977664+00:00",
+    "direction": "SELL",
+    "entry": 4140.0404,
+    "sl": 4160.0404,
+    "tp1": 4130.0404,
+    "score": -5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending",
+    "timeout_hours": 4
   }
 ]
