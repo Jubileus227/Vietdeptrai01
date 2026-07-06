@@ -685,8 +685,9 @@
     "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "breakeven",
+    "timeout_hours": 4,
+    "usd": 0.0
   },
   {
     "time_iso": "2026-07-06T14:02:42.375495+00:00",
@@ -696,6 +697,20 @@
     "tp1": 4145.160215,
     "score": -1,
     "mode": "experimental",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -29.59
+  },
+  {
+    "time_iso": "2026-07-06T14:10:56.698770+00:00",
+    "direction": "SELL",
+    "entry": 4133.44917,
+    "sl": 4153.44917,
+    "tp1": 4123.44917,
+    "score": -5,
+    "mode": "trend",
     "confidence": "normal",
     "entry_type": "market",
     "status": "pending",
