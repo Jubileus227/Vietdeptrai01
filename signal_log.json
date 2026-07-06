@@ -601,8 +601,9 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "win",
+    "timeout_hours": 4,
+    "usd": 33.66
   },
   {
     "time_iso": "2026-07-06T12:15:42.204516+00:00",
@@ -614,8 +615,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "win",
+    "timeout_hours": 4,
+    "usd": 25.16
   },
   {
     "time_iso": "2026-07-06T12:20:53.109393+00:00",
@@ -624,6 +626,20 @@
     "sl": 4158.579902,
     "tp1": 4150.19408,
     "score": -1,
+    "mode": "experimental",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "win",
+    "timeout_hours": 4,
+    "usd": 26.28
+  },
+  {
+    "time_iso": "2026-07-06T12:25:28.199375+00:00",
+    "direction": "BUY",
+    "entry": 4147.27719,
+    "sl": 4143.697045553301,
+    "tp1": 4151.393695000001,
+    "score": -4,
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
