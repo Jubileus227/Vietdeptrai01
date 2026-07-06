@@ -152,6 +152,24 @@ def detect_bos(df, lookback=20):
     return None
 
 
+def detect_bos_level(df, lookback=20):
+    """
+    Giống detect_bos nhưng trả về CẢ mức giá đã bị phá vỡ (không chỉ hướng) - dùng làm
+    điểm "chờ giá quay lại test" (retest) trước khi vào lệnh, thay vì vào ngay lúc breakout
+    (tránh FOMO đúng đỉnh/đáy sóng - giá thường quay lại test vùng vừa phá vỡ trước khi
+    tiếp tục đi, khung càng lớn thời gian quay lại test càng lâu).
+    """
+    if len(df) <= lookback:
+        return None
+    recent = df.iloc[-lookback:-1]
+    curr_close = df.iloc[-1]["close"]
+    if curr_close > recent["high"].max():
+        return {"direction": "up", "level": recent["high"].max()}
+    if curr_close < recent["low"].min():
+        return {"direction": "down", "level": recent["low"].min()}
+    return None
+
+
 def detect_order_block(df, lookback=20):
     """
     Order Block đơn giản (không phải chuẩn SMC chính thức):
@@ -1354,6 +1372,12 @@ def generate_signal(active_zone_directions=None):
     fvg = detect_fvg(df_m5)
     ob = detect_order_block(df_m5)
 
+    # BOS đa khung kèm mức giá đã phá vỡ - dùng để chờ giá quay lại test (retest) thay vì
+    # vào lệnh ngay lúc breakout. Khung càng lớn thì thời gian chờ quay lại test càng lâu.
+    bos_m5_info = detect_bos_level(df_m5)
+    bos_m15_info = detect_bos_level(df_m15)
+    bos_h1_info = detect_bos_level(df_h1)
+
     rsi_m5 = rsi(df_m5["close"]).iloc[-1]
     atr_m5 = atr(df_m5).iloc[-1]
     atr_m15_series = atr(df_m15)
@@ -1584,6 +1608,7 @@ def generate_signal(active_zone_directions=None):
         "momentum_note": momentum_note,
         "zone_setup_secondary": zone_setup_secondary,
         "timeout_hours": SIGNAL_TIMEOUT_HOURS,
+        "bos_retest_note": None,
     }
 
     if direction and signal_mode == "mean_reversion":
@@ -1617,10 +1642,41 @@ def generate_signal(active_zone_directions=None):
         result["fib_note"] = fib_confluence_note(fib, exp["entry"], exp["sl"], exp["tp1"], atr_m5)
 
     elif direction:
-        # Kiểm tra giá hiện tại đã chạy quá xa vùng OB chưa -> tránh khuyến nghị mua/bán đuổi
-        chase = check_entry_chase(direction, current_price, ob, atr_m5)
-        entry = chase["suggested_entry"] if chase else current_price
-        entry_type = "limit" if chase else "market"
+        # Ưu tiên 1: nếu VỪA có breakout (BOS) ĐÚNG CHIỀU lệnh trên khung nào đó (M5/M15/H1),
+        # đừng vào ngay lúc breakout (dễ FOMO đúng đỉnh/đáy sóng) - chờ giá quay lại TEST đúng
+        # mức đã phá vỡ trước, giống hành vi thực tế của thị trường (throw-back/retest).
+        # Ưu tiên khung LỚN NHẤT có breakout trùng hướng - khung càng lớn, chờ retest càng lâu.
+        wanted_break_dir = "up" if direction == "BUY" else "down"
+        bos_retest = None
+        for tf_name, info, retest_timeout in (
+            ("H1", bos_h1_info, 24 * 3),   # BOS khung H1 -> có thể mất tới ~3 ngày mới quay lại test
+            ("M15", bos_m15_info, 24),      # BOS khung M15 -> khoảng 1 ngày
+            ("M5", bos_m5_info, SIGNAL_TIMEOUT_HOURS),  # BOS khung M5 -> vài tiếng như cũ
+        ):
+            if info and info["direction"] == wanted_break_dir:
+                bos_retest = {"level": info["level"], "tf": tf_name, "timeout_hours": retest_timeout}
+                break
+
+        # Ưu tiên 2 (nếu không có BOS retest): kiểm tra giá đã chạy quá xa vùng OB chưa
+        chase = None if bos_retest else check_entry_chase(direction, current_price, ob, atr_m5)
+
+        if bos_retest:
+            entry = bos_retest["level"]
+            entry_type = "limit"
+            custom_timeout = bos_retest["timeout_hours"]
+            bos_retest_note = (f"Vừa phá {'đỉnh' if wanted_break_dir == 'up' else 'đáy'} khung "
+                                f"{bos_retest['tf']} - chờ giá quay về test {entry:.2f} thay vì vào "
+                                f"ngay lúc breakout (tránh FOMO đúng đỉnh/đáy sóng)")
+        elif chase:
+            entry = chase["suggested_entry"]
+            entry_type = "limit"
+            custom_timeout = None
+            bos_retest_note = None
+        else:
+            entry = current_price
+            entry_type = "market"
+            custom_timeout = None
+            bos_retest_note = None
 
         # SL động trong khoảng [10, 20] theo ATR(M5) - tránh bị stop-hunt quét SL trong
         # thị trường biến động mạnh (xem dynamic_sl_distance để biết cách nội suy).
@@ -1644,7 +1700,10 @@ def generate_signal(active_zone_directions=None):
         result.update({
             "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
             "entry_type": entry_type, "chase_warning": chase, "rr": r1,
+            "bos_retest_note": bos_retest_note,
         })
+        if custom_timeout is not None:
+            result["timeout_hours"] = custom_timeout
         result["fib_note"] = fib_confluence_note(fib, entry, sl, tp1, atr_m5)
 
     return result
@@ -1731,6 +1790,9 @@ def format_message(sig, win_stats=None, active_trades=None):
         if sig.get("signal_mode") == "zone_setup" and sig.get("entry_zone"):
             zlow, zhigh = sig["entry_zone"]
             lines.append(f"📍 Entry: {zlow:.2f}-{zhigh:.2f}")
+        elif sig.get("bos_retest_note"):
+            lines.append(f"⏳ {sig['bos_retest_note']}")
+            lines.append(f"📍 Entry (limit, chờ retest): {sig['entry']:.2f}")
         elif sig.get("chase_warning"):
             cw = sig["chase_warning"]
             lines.append(f"⏳ Giá xa OB {cw['distance_atr']}x ATR - CHỜ GIÁ VỀ, không đuổi")
