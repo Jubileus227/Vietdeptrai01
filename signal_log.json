@@ -1037,5 +1037,18 @@
     "status": "loss",
     "timeout_hours": 4,
     "usd": -12.92
+  },
+  {
+    "time_iso": "2026-07-06T21:20:48.846334+00:00",
+    "direction": "BUY",
+    "entry": 4165.23977,
+    "sl": 4152.542282046162,
+    "tp1": 4171.58851397692,
+    "score": 5,
+    "mode": "trend",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending",
+    "timeout_hours": 4
   }
 ]
