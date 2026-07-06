@@ -867,6 +867,20 @@
     "mode": "mean_reversion",
     "confidence": "normal",
     "entry_type": "market",
+    "status": "breakeven",
+    "timeout_hours": 4,
+    "usd": 0.0
+  },
+  {
+    "time_iso": "2026-07-06T17:20:51.782379+00:00",
+    "direction": "SELL",
+    "entry": 4151.56398,
+    "sl": 4158.111796310347,
+    "tp1": 4144.611605,
+    "score": 1,
+    "mode": "mean_reversion",
+    "confidence": "normal",
+    "entry_type": "market",
     "status": "pending",
     "timeout_hours": 4
   }
