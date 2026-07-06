@@ -1034,7 +1034,8 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -12.92
   }
 ]
