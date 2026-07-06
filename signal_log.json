@@ -1006,8 +1006,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -14.7
   },
   {
     "time_iso": "2026-07-06T19:25:33.843435+00:00",
@@ -1019,8 +1020,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -12.92
   },
   {
     "time_iso": "2026-07-06T19:35:21.781582+00:00",
