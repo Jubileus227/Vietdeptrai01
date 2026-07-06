@@ -643,8 +643,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -17.9
   },
   {
     "time_iso": "2026-07-06T12:31:05.119788+00:00",
