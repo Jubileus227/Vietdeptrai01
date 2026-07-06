@@ -645,5 +645,18 @@
     "entry_type": "market",
     "status": "pending",
     "timeout_hours": 4
+  },
+  {
+    "time_iso": "2026-07-06T12:31:05.119788+00:00",
+    "direction": "BUY",
+    "entry": 4145.55536,
+    "sl": 4140.698424739763,
+    "tp1": 4151.565995,
+    "score": -4,
+    "mode": "mean_reversion",
+    "confidence": "normal",
+    "entry_type": "market",
+    "status": "pending",
+    "timeout_hours": 4
   }
 ]
