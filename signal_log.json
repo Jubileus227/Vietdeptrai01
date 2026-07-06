@@ -754,8 +754,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -23.32
   },
   {
     "time_iso": "2026-07-06T15:55:27.412893+00:00",
@@ -767,8 +768,9 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -21.36
   },
   {
     "time_iso": "2026-07-06T16:01:09.786980+00:00",
@@ -835,7 +837,8 @@
     "mode": "experimental",
     "confidence": "normal",
     "entry_type": "market",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -16.82
   }
 ]
