@@ -1863,25 +1863,33 @@ def send_telegram(message):
     return r.json()
 
 
-def generate_box_chart(df, box, filename="box_chart.png", lookback_candles=60):
+def generate_box_chart(df, box, filename="box_chart.png", lookback_candles=40):
     """
     Vẽ biểu đồ nến kèm box (biên trên/dưới tô màu, đường giữa biên) để gửi kèm Telegram -
     giúp nhìn trực quan hơn thay vì chỉ đọc số. Dùng backend 'Agg' (không cần màn hình đồ
-    họa) để chạy được trên GitHub Actions.
+    họa) để chạy được trên GitHub Actions. Giảm số nến + tăng độ phân giải + thêm nhãn thời
+    gian để đỡ bị "dính" nến khi nén ảnh nhỏ gửi qua Telegram xem trên điện thoại.
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
 
     recent = df.iloc[-lookback_candles:].reset_index(drop=True)
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Sàn tối thiểu để nến doji (thân gần như = 0) vẫn hiện được 1 vạch mỏng nhìn thấy -
+    # tính theo % biên độ HIỂN THỊ trên biểu đồ (không phải % giá tuyệt đối, tránh phóng to
+    # sai thân nến thật khi giá vàng ở mức cao như ~4100 USD).
+    price_range = recent["high"].max() - recent["low"].min()
+    min_body_height = max(price_range * 0.003, 0.01)
 
     for i, row in recent.iterrows():
         color = "#26a69a" if row["close"] >= row["open"] else "#ef5350"
         ax.plot([i, i], [row["low"], row["high"]], color=color, linewidth=1)
         body_low = min(row["open"], row["close"])
         body_high = max(row["open"], row["close"])
-        ax.add_patch(plt.Rectangle((i - 0.3, body_low), 0.6, max(body_high - body_low, 0.01 * row["close"]),
+        ax.add_patch(plt.Rectangle((i - 0.35, body_low), 0.7, max(body_high - body_low, min_body_height),
                                     facecolor=color, edgecolor=color))
 
     if box:
@@ -1896,11 +1904,19 @@ def generate_box_chart(df, box, filename="box_chart.png", lookback_candles=60):
     else:
         ax.set_title("XAU/USD")
 
+    # Nhãn thời gian trục ngang - chỉ hiện ~8 mốc để không rối, định dạng ngắn gọn dd/mm HH:MM
+    if "datetime" in recent.columns:
+        n_ticks = min(8, len(recent))
+        tick_idx = np.linspace(0, len(recent) - 1, n_ticks).astype(int)
+        ax.set_xticks(tick_idx)
+        ax.set_xticklabels([recent["datetime"].iloc[j].strftime("%d/%m %H:%M") for j in tick_idx],
+                            rotation=30, ha="right", fontsize=8)
+
     ax.set_xlim(-1, len(recent))
     ax.set_ylabel("Giá (USD)")
     ax.grid(alpha=0.2)
     plt.tight_layout()
-    plt.savefig(filename, dpi=120)
+    plt.savefig(filename, dpi=160)
     plt.close(fig)
     return filename
 
