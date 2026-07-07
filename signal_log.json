@@ -1148,5 +1148,18 @@
     "entry_type": "limit",
     "status": "waiting_fill",
     "timeout_hours": 4
+  },
+  {
+    "time_iso": "2026-07-07T14:05:36.330772+00:00",
+    "direction": "BUY",
+    "entry": 4162.76461,
+    "sl": 4142.76461,
+    "tp1": 4181.5,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4
   }
 ]
