@@ -192,23 +192,54 @@ BOX_RANGE_ATR_MULT = 2.0    # nến thanh khoản phải có biên độ >= 2x A
 BOX_RETEST_TOLERANCE_ATR = 0.3  # giá được coi là "đã quay về test" nếu cách điểm entry <= 0.3x ATR
 BOX_SL_CONFIRMED = 20       # SL cho entry đã xác nhận (giá) - theo đúng bảng đã thống nhất
 BOX_SL_RISK = 10            # SL cho entry rủi ro (box chưa xác nhận) - giá
+BOX_MAX_DISTANCE_ATR = 8.0  # box cách giá hiện tại quá xa (theo ATR HIỆN TẠI) thì coi là hết liên quan
 
 
 def find_recent_liquidity_boxes(df, atr_series, lookback=BOX_LOOKBACK,
-                                 range_mult=BOX_RANGE_ATR_MULT, max_boxes=2, skip_last=1):
+                                 range_mult=BOX_RANGE_ATR_MULT, max_boxes=2, skip_last=1,
+                                 max_distance_atr=BOX_MAX_DISTANCE_ATR, bound_range=None):
     """
     Quét ngược từ nến gần nhất (bỏ qua skip_last nến cuối) để tìm tối đa max_boxes nến
-    "tập trung thanh khoản" gần nhất - biên độ >= range_mult x ATR tại thời điểm đó.
+    "tập trung thanh khoản" gần nhất - biên độ >= range_mult x ATR. Có 2 lớp lọc "còn liên
+    quan tới giá hiện tại", tránh chọn nhầm 1 box cũ/nhỏ đã hết ý nghĩa giao dịch:
+    1. Biên độ nến phải đủ lớn so với ATR HIỆN TẠI (không chỉ so với ATR lúc nó hình thành) -
+       tránh chọn nến "thanh khoản giả" từ giai đoạn cũ yên tĩnh hơn nhiều so với bây giờ.
+    2. Khoảng cách từ giá hiện tại đến biên gần nhất của box không được quá max_distance_atr
+       lần ATR hiện tại - nếu giá đã trôi quá xa mà chưa từng quay lại test, coi như hết liên quan.
+    Nếu truyền bound_range=(low, high): CHỈ chấp nhận nến nằm LỌT HẲN trong khoảng đó - dùng để
+    tìm box khung nhỏ (M15) NẰM TRONG box khung lớn (H1) đã chọn trước, đúng cấu trúc "range nhỏ
+    lồng trong range to".
     """
     boxes = []
     n = len(df)
     start = max(0, n - lookback)
+    current_price = df.iloc[-1]["close"]
+    atr_now = atr_series.iloc[-1]
     i = n - 1 - skip_last
     while i > start and len(boxes) < max_boxes:
         candle = df.iloc[i]
         candle_range = candle["high"] - candle["low"]
         local_atr = atr_series.iloc[i]
-        if not pd.isna(local_atr) and local_atr > 0 and candle_range >= range_mult * local_atr:
+        qualifies = not pd.isna(local_atr) and local_atr > 0 and candle_range >= range_mult * local_atr
+
+        if qualifies and atr_now > 0:
+            qualifies = candle_range >= range_mult * atr_now * 0.5
+
+        if qualifies and bound_range:
+            lo, hi = bound_range
+            if not (candle["low"] >= lo - 1e-9 and candle["high"] <= hi + 1e-9):
+                qualifies = False
+
+        if qualifies and atr_now > 0:
+            dist_to_box = 0.0
+            if current_price > candle["high"]:
+                dist_to_box = current_price - candle["high"]
+            elif current_price < candle["low"]:
+                dist_to_box = candle["low"] - current_price
+            if (dist_to_box / atr_now) > max_distance_atr:
+                qualifies = False
+
+        if qualifies:
             boxes.append({
                 "idx": i, "high": float(candle["high"]), "low": float(candle["low"]),
                 "color": "green" if candle["close"] > candle["open"] else "red",
@@ -246,7 +277,7 @@ def merge_boxes_if_overlap(boxes):
 
 
 def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_ATR_MULT,
-                    retest_tolerance_atr=BOX_RETEST_TOLERANCE_ATR):
+                    retest_tolerance_atr=BOX_RETEST_TOLERANCE_ATR, bound_range=None):
     """
     Trả về trạng thái box gần nhất:
     - None: không tìm thấy nến thanh khoản nào phù hợp trong phạm vi quét
@@ -254,8 +285,11 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
       -> chỉ có "entry rủi ro" (SL 10 giá) tại 2 cạnh, chưa rõ hướng
     - state="waiting_retest": đã xác nhận breakout nhưng giá CHƯA quay lại test biên
     - state="ready": đã xác nhận VÀ giá đã quay lại test - sẵn sàng entry (SL 20 giá)
+    Truyền bound_range=(low, high) để CHỈ tìm box nằm LỌT trong 1 box khung lớn hơn đã chọn
+    trước - dùng cho cấu trúc "box M15 nằm trong box H1".
     """
-    boxes = find_recent_liquidity_boxes(df, atr_series, lookback=lookback, range_mult=range_mult)
+    boxes = find_recent_liquidity_boxes(df, atr_series, lookback=lookback, range_mult=range_mult,
+                                         bound_range=bound_range)
     if not boxes:
         return None
 
@@ -1109,15 +1143,18 @@ def compute_win_rate(log, mode=None, confidence=None):
 
 def active_trades_summary(log, current_price=None, max_count=3):
     """
-    Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hòa vốn/hết hạn) để nhắc lại mỗi lần chạy -
-    tránh trường hợp bạn quên mất 1 lệnh chờ (limit) đang treo, hoặc 1 lệnh đã khớp đang chạy.
+    Liệt kê các lệnh CÒN HIỆU LỰC (chưa thắng/thua/hòa vốn/hết hạn), tách RIÊNG 2 loại để
+    tránh nhầm lẫn "đã vào lệnh thật" với "mới chỉ là lệnh chờ chưa khớp":
+    - "waiting": lệnh limit CHƯA khớp (giá chưa chạm tới) - chỉ là kế hoạch, chưa phải giao dịch thật
+    - "running": lệnh ĐÃ khớp, đang chạy chờ chạm TP/SL - giao dịch thật đang mở
     Nếu truyền current_price, hiện thêm số $ lời/lỗ tạm tính cho lệnh đã khớp.
+    Trả về dict {"waiting": [...], "running": [...]}.
     """
     now = datetime.now(timezone.utc)
     active = [r for r in log if r.get("status") in ("waiting_fill", "pending")]
     active = active[-max_count:]  # chỉ lấy các lệnh gần nhất, tránh tin nhắn quá dài
 
-    summary = []
+    waiting, running = [], []
     for rec in active:
         timeout = rec.get("timeout_hours", SIGNAL_TIMEOUT_HOURS)
         try:
@@ -1129,16 +1166,16 @@ def active_trades_summary(log, current_price=None, max_count=3):
         icon = "🔁" if rec.get("mode") == "mean_reversion" else "📈"
         if rec["status"] == "waiting_fill":
             time_txt = f", còn {hours_left:.1f}h" if hours_left is not None else ""
-            summary.append(f"{icon} {rec['direction']} Limit @ {rec['entry']:.2f} (chờ khớp{time_txt})")
+            waiting.append(f"{icon} {rec['direction']} Limit @ {rec['entry']:.2f} (còn hiệu lực{time_txt})")
         else:  # pending - đã khớp, đang chạy chờ TP/SL
             usd_txt = ""
             if current_price is not None:
                 usd_now = (current_price - rec["entry"]) * USD_PER_POINT if rec["direction"] == "BUY" \
                     else (rec["entry"] - current_price) * USD_PER_POINT
                 usd_txt = f", {'+' if usd_now >= 0 else ''}${usd_now:.2f}"
-            summary.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f} (đang chạy{usd_txt})")
+            running.append(f"{icon} {rec['direction']} @ {rec['entry']:.2f} → TP {rec['tp1']:.2f}{usd_txt}")
 
-    return summary
+    return {"waiting": waiting, "running": running}
 
 
 def mean_reversion_signal(current_price, sr, rsi_value, atr_value, near_threshold=0.25):
@@ -1608,11 +1645,17 @@ def generate_signal(active_zone_directions=None):
     news_warning = check_upcoming_news()
 
     # --- BOX DETECTOR: thay thế hoàn toàn hệ thống chấm điểm cũ (Trend/Mean-Reversion/
-    # Zone Setup/Thử nghiệm). Tìm box trên cả M15 và H1, ưu tiên box đã "ready" (đã xác nhận
-    # + giá đã quay lại test), ưu tiên khung H1 (cấu trúc lớn hơn) nếu cả 2 cùng trạng thái.
+    # Zone Setup/Thử nghiệm). Tìm box H1 TRƯỚC (cấu trúc lớn), sau đó ràng buộc box M15 phải
+    # nằm LỌT trong phạm vi box H1 đã chọn - đúng cấu trúc "range nhỏ lồng trong range to".
+    # Cả 2 đều tự loại bỏ box đã quá xa giá hiện tại (không còn liên quan để giao dịch).
     atr_h1_series = atr(df_h1)
-    box_m15 = find_box_state(df_m15, atr_m15_series)
     box_h1 = find_box_state(df_h1, atr_h1_series)
+    box_m15 = None
+    if box_h1:
+        box_m15 = find_box_state(df_m15, atr_m15_series,
+                                  bound_range=(box_h1["box_low"], box_h1["box_high"]))
+    else:
+        box_m15 = find_box_state(df_m15, atr_m15_series)  # không có box H1 thì M15 tìm tự do
     box_signal = build_box_signal(box_m15, box_h1, atr_m5)
 
     direction = None
@@ -1814,12 +1857,19 @@ def format_message(sig, win_stats=None, active_trades=None):
         lines.append(f"⚪ {sig['block_reason'] if sig['block_reason'] else 'Chưa tìm thấy box nào để theo dõi'}")
         lines.append("")
 
-    # ---------- Khối "🔄 LỆNH ĐANG CHẠY": chỉ hiện khi có, ẩn hẳn nếu trống ----------
-    if active_trades:
-        lines.append(section_header("🔄", "LỆNH ĐANG CHẠY"))
-        for t in active_trades:
-            lines.append(t)
-        lines.append("")
+    # ---------- Khối lệnh: TÁCH RIÊNG "chờ khớp" (chưa phải giao dịch thật) và "đang chạy"
+    # (đã khớp, giao dịch thật đang mở) - tránh nhầm lẫn giữa kế hoạch và lệnh đã vào thật ----------
+    if active_trades and (active_trades.get("waiting") or active_trades.get("running")):
+        if active_trades.get("waiting"):
+            lines.append(section_header("⏳", "ĐANG CHỜ KHỚP (chưa vào lệnh)"))
+            for t in active_trades["waiting"]:
+                lines.append(t)
+            lines.append("")
+        if active_trades.get("running"):
+            lines.append(section_header("✅", "ĐANG CHẠY (đã khớp)"))
+            for t in active_trades["running"]:
+                lines.append(t)
+            lines.append("")
 
     # ---------- Khối "📋 VÙNG THEO DÕI": LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
     def _fmt_zone(z):
