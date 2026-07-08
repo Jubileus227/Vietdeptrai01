@@ -336,6 +336,14 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
         return {"box_high": box_high, "box_low": box_low, "box_mid": box_mid,
                 "color": color, "state": "unconfirmed", "in_middle": in_middle}
 
+    # VÔ HIỆU HÓA: nếu giá không chỉ "quay lại test" mà đã XUYÊN QUA TOÀN BỘ box sang phía
+    # đối diện (vd: phá đáy, chờ tăng lại test, nhưng giá đã tăng vượt LUÔN cả cạnh trên) -
+    # giả thuyết ban đầu không còn ý nghĩa, box này hết hiệu lực, không nên tiếp tục tham khảo.
+    if confirm_dir == "down" and current_price > box_high:
+        return None
+    if confirm_dir == "up" and current_price < box_low:
+        return None
+
     # Bảng ma trận: màu nến thanh khoản x hướng xác nhận -> hướng lệnh + độ thuận/ngược xu hướng
     if color == "green":
         if confirm_dir == "down":
