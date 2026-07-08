@@ -1241,7 +1241,21 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "breakeven",
+    "timeout_hours": 4,
+    "usd": 0.0
+  },
+  {
+    "time_iso": "2026-07-08T20:25:28.827110+00:00",
+    "direction": "SELL",
+    "entry": 4076.705035,
+    "sl": 4096.705035,
+    "tp1": 4046.44,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
     "timeout_hours": 4
   }
 ]
