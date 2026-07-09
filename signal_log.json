@@ -1341,5 +1341,18 @@
     "status": "loss",
     "timeout_hours": 4,
     "usd": -100.0
+  },
+  {
+    "time_iso": "2026-07-09T18:05:30.213058+00:00",
+    "direction": "BUY",
+    "entry": 4158.51057,
+    "sl": 4138.51057,
+    "tp1": 4185.21,
+    "score": 0,
+    "mode": "box",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4
   }
 ]
