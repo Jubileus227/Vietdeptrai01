@@ -356,9 +356,10 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
         else:
             direction, alignment, entry_labels = "SELL", "ngược", ["mid", "high"]
 
-    # "cạnh trên"/"cạnh dưới" dùng biên XA NHẤT (an toàn hơn khi box chồng lấn), "giữa biên"
-    # dùng trung điểm vùng giao nhau
-    label_price = {"low": merged["outer_low"], "high": merged["outer_high"], "mid": box_mid}
+    # Dùng NHẤT QUÁN biên hiển thị (box_high/box_low) cho mọi điểm entry - tránh lệch số liệu
+    # giữa box hiển thị và giá entry thật (trước đây "cạnh trên/dưới" dùng biên xa hơn khi có
+    # box chồng lấn, gây chênh lệch khó hiểu so với box hiển thị trong tin nhắn).
+    label_price = {"low": box_low, "high": box_high, "mid": box_mid}
     entries = [{"label": lbl, "price": label_price[lbl]} for lbl in entry_labels]
 
     tol = retest_tolerance_atr * atr_now if atr_now > 0 else 0
@@ -372,11 +373,30 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
     }
 
 
+BOX_TP1_MIN = 5.0           # TP1 tối thiểu (giá) - box nhỏ
+BOX_TP1_MAX = 10.0          # TP1 tối đa (giá) - box lớn
+BOX_TP1_HEIGHT_LOW = 15.0   # chiều cao box được coi là "nhỏ" (TP1 = mức tối thiểu)
+BOX_TP1_HEIGHT_HIGH = 50.0  # chiều cao box được coi là "lớn" (TP1 = mức tối đa)
+
+
 def compute_box_tp(direction, entry, box_height, multiples=(1.0, 2.0, 3.0)):
-    """TP = chiều cao box x (1, 2, 3 lần), chiếu tiếp theo hướng lệnh từ biên đối diện."""
+    """
+    TP1 CHỈ 5-10 giá (không phải cả chiều cao box như trước - quá xa, hiếm khi chạm tới) -
+    nội suy theo box nhỏ hay lớn: box nhỏ -> TP1 gần mức tối thiểu (5 giá), box lớn -> TP1
+    gần mức tối đa (10 giá). TP2/TP3 tăng dần theo bội số của khoảng TP1 này (không phải
+    theo chiều cao box nữa) - giữ tỷ lệ chốt lời từng phần hợp lý mà vẫn khả thi hơn nhiều.
+    """
+    if box_height <= BOX_TP1_HEIGHT_LOW:
+        tp1_distance = BOX_TP1_MIN
+    elif box_height >= BOX_TP1_HEIGHT_HIGH:
+        tp1_distance = BOX_TP1_MAX
+    else:
+        ratio = (box_height - BOX_TP1_HEIGHT_LOW) / (BOX_TP1_HEIGHT_HIGH - BOX_TP1_HEIGHT_LOW)
+        tp1_distance = BOX_TP1_MIN + ratio * (BOX_TP1_MAX - BOX_TP1_MIN)
+
     if direction == "BUY":
-        return tuple(round(entry + box_height * m, 2) for m in multiples)
-    return tuple(round(entry - box_height * m, 2) for m in multiples)
+        return tuple(round(entry + tp1_distance * m, 2) for m in multiples)
+    return tuple(round(entry - tp1_distance * m, 2) for m in multiples)
 
 
 def build_box_signal(box_m15, box_h1, atr_m5):
@@ -850,6 +870,30 @@ def find_swing_levels(df, left=2, right=2):
         if candle["low"] == window_low.min():
             levels.append({"price": float(candle["low"]), "type": "low", "idx": i})
     return levels
+
+
+def detect_dow_trend(df, left=2, right=2, lookback=100):
+    """
+    Xác định xu hướng CHÍNH theo Lý thuyết Dow - dựa vào chuỗi đỉnh/đáy (swing) gần nhất:
+    - 2 đỉnh gần nhất TĂNG DẦN + 2 đáy gần nhất TĂNG DẦN (Higher High + Higher Low liên tiếp)
+      -> xu hướng TĂNG
+    - 2 đỉnh gần nhất GIẢM DẦN + 2 đáy gần nhất GIẢM DẦN (Lower High + Lower Low liên tiếp)
+      -> xu hướng GIẢM
+    - Còn lại (đỉnh/đáy không đồng thuận) -> chưa rõ ràng/đi ngang, trả về None
+    Dùng để đối chiếu với hướng lệnh Box Detector - lệnh THUẬN với xu hướng Dow đáng tin hơn
+    lệnh đi ngược lại.
+    """
+    recent = df.iloc[-lookback:].reset_index(drop=True)
+    swings = find_swing_levels(recent, left=left, right=right)
+    highs = [s["price"] for s in swings if s["type"] == "high"]
+    lows = [s["price"] for s in swings if s["type"] == "low"]
+    if len(highs) < 2 or len(lows) < 2:
+        return None
+    if highs[-1] > highs[-2] and lows[-1] > lows[-2]:
+        return "up"
+    if highs[-1] < highs[-2] and lows[-1] < lows[-2]:
+        return "down"
+    return None
 
 
 def filter_unbroken_levels(df, levels):
@@ -1691,6 +1735,12 @@ def generate_signal(active_zone_directions=None):
         box_m15 = find_box_state(df_m15, atr_m15_series)  # không có box H1 thì M15 tìm tự do
     box_signal = build_box_signal(box_m15, box_h1, atr_m5)
 
+    # Xu hướng CHÍNH theo Lý thuyết Dow (chuỗi đỉnh/đáy H1) - dùng để đối chiếu với hướng lệnh
+    # box, không phải điều kiện chặn cứng mà chỉ là 1 lớp cảnh báo thêm khi 2 bên mâu thuẫn.
+    dow_trend = detect_dow_trend(df_h1)
+    if box_signal:
+        box_signal["dow_trend"] = dow_trend
+
     direction = None
     block_reason = None
     signal_mode = "box"
@@ -1707,6 +1757,11 @@ def generate_signal(active_zone_directions=None):
         if box_signal["alignment"] == "ngược":
             confidence = "low"
             confidence_notes.append("Lệnh NGƯỢC xu hướng của nến thanh khoản (chỉ 2 điểm entry, thận trọng hơn)")
+        dow_conflict = (dow_trend == "up" and direction == "SELL") or (dow_trend == "down" and direction == "BUY")
+        if dow_conflict:
+            confidence = "low"
+            dow_txt = "TĂNG" if dow_trend == "up" else "GIẢM"
+            confidence_notes.append(f"Ngược xu hướng chính theo Dow (H1 đang {dow_txt} theo chuỗi đỉnh/đáy) - rủi ro cao hơn")
     else:
         state_txt = "chưa xác nhận breakout" if box_signal["state"] == "unconfirmed" else "đã xác nhận, đang chờ giá quay về test biên"
         block_reason = f"Có box {box_signal['tf']} ({state_txt}) - xem chi tiết box bên dưới"
@@ -1857,6 +1912,9 @@ def format_message(sig, win_stats=None, active_trades=None):
         lines.append(section_header(header_emoji, f"BOX {box['tf']} - {state_label}"))
         color_txt = "🟢 XANH" if box["color"] == "green" else "🔴 ĐỎ"
         lines.append(f"Nến thanh khoản {color_txt}   |   Biên: {box['box_low']:.2f} – {box['box_high']:.2f}")
+        dow_trend = box.get("dow_trend")
+        if dow_trend:
+            lines.append(f"📐 Xu hướng chính (Dow, H1): {'TĂNG (HH+HL)' if dow_trend == 'up' else 'GIẢM (LH+LL)'}")
 
         if box["state"] == "unconfirmed":
             if box.get("in_middle"):
