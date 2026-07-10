@@ -1520,7 +1520,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "expired",
     "timeout_hours": 4
   },
   {
