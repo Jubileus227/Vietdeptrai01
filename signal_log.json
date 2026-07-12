@@ -1685,7 +1685,8 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
-    "timeout_hours": 4
+    "status": "loss",
+    "timeout_hours": 4,
+    "usd": -100.0
   }
 ]
