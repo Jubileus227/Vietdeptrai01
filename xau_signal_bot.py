@@ -896,6 +896,56 @@ def detect_dow_trend(df, left=2, right=2, lookback=100):
     return None
 
 
+def detect_ichimoku_signal(df, tenkan_period=9, kijun_period=26, senkou_b_period=52):
+    """
+    Xác định tín hiệu Ichimoku (Kumo/mây) tại thời điểm HIỆN TẠI - đúng chuẩn: mây hiển thị
+    tại nến hiện tại thực ra được TÍNH TỪ dữ liệu 26 kỳ TRƯỚC đó (Senkou Span dịch chuyển
+    tới trước 26 kỳ khi vẽ), nên phải lùi lại đúng 26 kỳ để lấy dữ liệu tính mây cho đúng.
+
+    Phân loại 5 trường hợp theo độ tin cậy (đã thống nhất qua trao đổi trước):
+    - "strong_bull": giá TRÊN mây XANH (Span A > Span B) - tăng, đáng tin nhất
+    - "new_bull": giá TRÊN mây ĐỎ (Span A < Span B) - tăng nhưng mới, chưa chắc
+    - "strong_bear": giá DƯỚI mây ĐỎ - giảm, đáng tin nhất
+    - "new_bear": giá DƯỚI mây XANH - giảm nhưng mới, chưa chắc
+    - "unclear": giá đang NẰM TRONG mây - chưa rõ xu hướng
+    """
+    n = len(df)
+    idx = n - 1 - kijun_period  # điểm dữ liệu dùng để tính mây tại thời điểm hiện tại
+    if idx < senkou_b_period:
+        return None
+
+    window = df.iloc[:idx + 1]
+    tenkan = (window["high"].iloc[-tenkan_period:].max() + window["low"].iloc[-tenkan_period:].min()) / 2
+    kijun = (window["high"].iloc[-kijun_period:].max() + window["low"].iloc[-kijun_period:].min()) / 2
+    span_a = (tenkan + kijun) / 2
+    span_b = (window["high"].iloc[-senkou_b_period:].max() + window["low"].iloc[-senkou_b_period:].min()) / 2
+
+    current_price = df.iloc[-1]["close"]
+    cloud_color = "green" if span_a > span_b else "red"
+    cloud_top, cloud_bottom = max(span_a, span_b), min(span_a, span_b)
+
+    if current_price > cloud_top:
+        position = "above"
+    elif current_price < cloud_bottom:
+        position = "below"
+    else:
+        position = "inside"
+
+    if position == "above" and cloud_color == "green":
+        strength = "strong_bull"
+    elif position == "above" and cloud_color == "red":
+        strength = "new_bull"
+    elif position == "below" and cloud_color == "red":
+        strength = "strong_bear"
+    elif position == "below" and cloud_color == "green":
+        strength = "new_bear"
+    else:
+        strength = "unclear"
+
+    return {"position": position, "cloud_color": cloud_color, "strength": strength,
+            "span_a": span_a, "span_b": span_b}
+
+
 def filter_unbroken_levels(df, levels):
     """Chỉ giữ lại mức CHƯA bị giá đóng cửa phá vỡ sau khi hình thành (còn 'nguyên vẹn')."""
     unbroken = []
@@ -1741,6 +1791,24 @@ def generate_signal(active_zone_directions=None):
     if box_signal:
         box_signal["dow_trend"] = dow_trend
 
+    # Ichimoku Kumo (mây) H1 - tương tự Dow, chỉ cảnh báo khi mâu thuẫn ở mức MẠNH NHẤT
+    # (giá trên mây xanh / dưới mây đỏ) - các trường hợp "mới hình thành"/"trong mây" chưa đủ
+    # rõ ràng để coi là mâu thuẫn thật sự, không hạ độ tin cậy vì lý do đó.
+    ichimoku_h1 = detect_ichimoku_signal(df_h1)
+    if box_signal:
+        box_signal["ichimoku"] = ichimoku_h1
+
+    # Mũi tên xu hướng đa khung (H4/H1/M30/M15/M5) - chỉ để theo dõi trực quan, không ảnh
+    # hưởng logic ra lệnh.
+    df_h4_arrow = resample_ohlc(df_m5, "4h")
+    trend_arrows = {
+        "H4": detect_trend(df_h4_arrow) if len(df_h4_arrow) >= 21 else None,
+        "H1": detect_trend(df_h1) if len(df_h1) >= 21 else None,
+        "M30": detect_trend(df_m30) if len(df_m30) >= 21 else None,
+        "M15": detect_trend(df_m15) if len(df_m15) >= 21 else None,
+        "M5": detect_trend(df_m5) if len(df_m5) >= 21 else None,
+    }
+
     direction = None
     block_reason = None
     signal_mode = "box"
@@ -1762,6 +1830,13 @@ def generate_signal(active_zone_directions=None):
             confidence = "low"
             dow_txt = "TĂNG" if dow_trend == "up" else "GIẢM"
             confidence_notes.append(f"Ngược xu hướng chính theo Dow (H1 đang {dow_txt} theo chuỗi đỉnh/đáy) - rủi ro cao hơn")
+        if ichimoku_h1:
+            ichimoku_conflict = (ichimoku_h1["strength"] == "strong_bull" and direction == "SELL") or \
+                                 (ichimoku_h1["strength"] == "strong_bear" and direction == "BUY")
+            if ichimoku_conflict:
+                confidence = "low"
+                pos_txt = "TRÊN mây XANH" if ichimoku_h1["strength"] == "strong_bull" else "DƯỚI mây ĐỎ"
+                confidence_notes.append(f"Ngược Ichimoku H1 (giá đang {pos_txt} - xác nhận mạnh) - rủi ro cao hơn")
     else:
         state_txt = "chưa xác nhận breakout" if box_signal["state"] == "unconfirmed" else "đã xác nhận, đang chờ giá quay về test biên"
         block_reason = f"Có box {box_signal['tf']} ({state_txt}) - xem chi tiết box bên dưới"
@@ -1855,6 +1930,7 @@ def generate_signal(active_zone_directions=None):
         "bos_retest_note": None,
         "box_signal": box_signal,
         "box_chart_df": (df_h1 if box_signal["tf"] == "H1" else df_m15) if box_signal else None,
+        "trend_arrows": trend_arrows,
     }
 
     if box_signal and box_signal["state"] == "ready":
@@ -1901,6 +1977,15 @@ def format_message(sig, win_stats=None, active_trades=None):
         price_line += f" ({sig['pct_change']:+.2f}%)"
     price_line += f"   {sig['time']}"
     lines.append(price_line)
+
+    # Mũi tên xu hướng đa khung (H4/H1/M30/M15/M5) - luôn hiển thị để theo dõi trực quan
+    arrows = sig.get("trend_arrows")
+    if arrows:
+        arrow_txt = "  ".join(
+            f"{tf}:{'🟢⬆️' if t == 'up' else ('🔴⬇️' if t == 'down' else '➖')}"
+            for tf, t in arrows.items()
+        )
+        lines.append(arrow_txt)
     lines.append("")
 
     # ---------- Khối Box: LUÔN hiển thị nếu tìm thấy box (kể cả chưa xác nhận/chưa retest) ----------
@@ -1915,6 +2000,17 @@ def format_message(sig, win_stats=None, active_trades=None):
         dow_trend = box.get("dow_trend")
         if dow_trend:
             lines.append(f"📐 Xu hướng chính (Dow, H1): {'TĂNG (HH+HL)' if dow_trend == 'up' else 'GIẢM (LH+LL)'}")
+
+        ichimoku = box.get("ichimoku")
+        if ichimoku:
+            ichimoku_txt = {
+                "strong_bull": "TRÊN mây XANH (tăng, mạnh nhất)",
+                "new_bull": "TRÊN mây ĐỎ (tăng, mới hình thành)",
+                "strong_bear": "DƯỚI mây ĐỎ (giảm, mạnh nhất)",
+                "new_bear": "DƯỚI mây XANH (giảm, mới hình thành)",
+                "unclear": "TRONG mây (chưa rõ xu hướng)",
+            }[ichimoku["strength"]]
+            lines.append(f"☁️ Ichimoku (H1): Giá {ichimoku_txt}")
 
         if box["state"] == "unconfirmed":
             if box.get("in_middle"):
