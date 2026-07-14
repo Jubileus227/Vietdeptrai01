@@ -349,6 +349,55 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
         return {"box_high": box_high, "box_low": box_low, "box_mid": box_mid,
                 "color": color, "state": "unconfirmed", "in_middle": in_middle}
 
+    # ====== PHÁ VỠ GIẢ (SPRING / STOP-HUNT REVERSAL) ======
+    # Rất nhiều cú phá biên range trên vàng thực chất là QUÉT STOP LOSS rồi đảo chiều
+    # (Wyckoff: Spring). Nhận diện: sau nến xác nhận breakout, giá ĐÓNG CỬA quay lại
+    # TRONG box trong vòng SPRING_WINDOW nến -> cú phá là GIẢ, tín hiệu đúng là lệnh
+    # NGƯỢC hướng phá: BUY tại biên dưới vừa bị quét (phá xuống giả) / SELL tại biên
+    # trên (phá lên giả). Khác "bắt dao rơi": vào khi phe phá vỡ vừa bị chứng minh là
+    # bẫy, vùng đã cạn stop loss - SL đặt dưới/trên ĐÁY/ĐỈNH CÚ QUÉT (điểm vô hiệu rõ).
+    post = after.iloc[confirm_idx + 1:]
+    spring = None
+    if len(post) > 0:
+        reentry_idx = None
+        for k in range(min(SPRING_WINDOW, len(post))):
+            c = post.iloc[k]
+            if confirm_dir == "down" and c["close"] > box_low:
+                reentry_idx = k; break
+            if confirm_dir == "up" and c["close"] < box_high:
+                reentry_idx = k; break
+        if reentry_idx is not None:
+            after_reentry = post.iloc[reentry_idx + 1:]
+            sweep_slice = after.iloc[confirm_idx: confirm_idx + 1 + reentry_idx + 1]
+            if confirm_dir == "down":
+                # Spring còn sống khi giá KHÔNG đóng cửa thủng đáy quét lần nữa
+                dead = (after_reentry["close"] < merged["outer_low"]).any() if len(after_reentry) else False
+                if not dead and current_price > box_low:
+                    spring = {"direction": "BUY", "boundary": box_low,
+                              "sweep_extreme": float(sweep_slice["low"].min())}
+            else:
+                dead = (after_reentry["close"] > merged["outer_high"]).any() if len(after_reentry) else False
+                if not dead and current_price < box_high:
+                    spring = {"direction": "SELL", "boundary": box_high,
+                              "sweep_extreme": float(sweep_slice["high"].max())}
+
+    if spring:
+        tol = retest_tolerance_atr * atr_now if atr_now > 0 else 0
+        # Entry tại biên vừa bị quét; sẵn sàng khi giá đã/đang quay về chạm biên đó
+        near = abs(current_price - spring["boundary"]) <= tol if tol > 0 else False
+        touched = False
+        if tol > 0 and reentry_idx is not None and len(post) > reentry_idx + 1:
+            pr = post.iloc[reentry_idx + 1:]
+            touched = ((pr["low"] - tol <= spring["boundary"]) & (spring["boundary"] <= pr["high"] + tol)).any()
+        return {
+            "box_high": box_high, "box_low": box_low, "box_mid": box_mid, "color": color,
+            "state": "spring_ready" if (near or touched) else "spring_waiting",
+            "direction": spring["direction"], "alignment": "spring",
+            "confirm_dir": confirm_dir, "sweep_extreme": spring["sweep_extreme"],
+            "entries": [{"label": "spring", "price": spring["boundary"]}],
+        }
+    # ====== HẾT PHẦN SPRING - dưới đây là luồng breakout thật như cũ ======
+
     # VÔ HIỆU HÓA: nếu giá không chỉ "quay lại test" mà đã XUYÊN QUA TOÀN BỘ box sang phía
     # đối diện (vd: phá đáy, chờ tăng lại test, nhưng giá đã tăng vượt LUÔN cả cạnh trên) -
     # giả thuyết ban đầu không còn ý nghĩa, box này hết hiệu lực, không nên tiếp tục tham khảo.
@@ -409,7 +458,16 @@ BOX_SL_MAX_POINTS = 25.0             # SL cấu trúc quá rộng -> BỎ QUA en
 BOX_SL_RISK_ATR = 0.75               # entry rủi ro (box chưa xác nhận): SL = 0.75x ATR, kẹp [5, 12]
 BOX_SL_RISK_MIN = 5.0
 BOX_SL_RISK_MAX = 12.0
+BOX_SL_MIN_ATR = 1.0                 # sàn SL động = max(5 giá, 1.0x ATR khung của box) - SL 5 giá
+                                     # cứng trên box H1 quá sát, 1 cú quét râu H1 bình thường đủ đá văng
 CHASE_WARNING_ATR = 2.5              # giá cách entry >= 2.5x ATR -> cảnh báo "chờ giá về, không đuổi"
+FAR_ENTRY_ATR = 4.0                  # entry gần nhất cách giá > 4x ATR -> KHÔNG phát lệnh (gần như
+                                     # chắc chắn hết hạn vô nghĩa, chỉ gây nhiễu) - chỉ hiển thị box
+SPRING_WINDOW = 5                    # phá vỡ giả: giá phải đóng cửa QUAY LẠI trong box trong vòng
+                                     # N nến (khung của box) sau nến xác nhận breakout
+REQUIRE_REJECTION_CANDLE = False     # True = chỉ phát lệnh khi có NẾN TỪ CHỐI M15 tại vùng entry.
+                                     # Mặc định TẮT: thay đổi tính chất entry, chỉ nên bật sau khi
+                                     # đã có vài tuần dữ liệu tracking sạch để so sánh trước/sau.
 
 
 def compute_box_tp(direction, entry, sl, multiples=BOX_RR_MULTIPLES):
@@ -436,6 +494,11 @@ def structural_sl(direction, entry_label, box_low, box_mid, box_high, atr_tf):
     BOX_SL_MAX_POINTS: cấu trúc quá rộng, entry này không đáng vào, bỏ qua thay vì ép SL.
     """
     buffer = BOX_SL_BUFFER_ATR * atr_tf if atr_tf and atr_tf > 0 else BOX_SL_MIN_POINTS * 0.2
+    # Sàn SL ĐỘNG theo khung: max(5 giá, 1.0x ATR khung của box). Box H1 (ATR ~5-8 giá)
+    # sẽ có SL tối thiểu đủ "thở"; box M15 vẫn giữ SL nhỏ gọn. SL 5 giá cứng trên cấu trúc
+    # H1 quá sát - 1 cú quét râu H1 bình thường đủ đá văng trước khi giá đi đúng hướng.
+    sl_floor = max(BOX_SL_MIN_POINTS, BOX_SL_MIN_ATR * atr_tf) if atr_tf and atr_tf > 0 \
+        else BOX_SL_MIN_POINTS
     if direction == "BUY":
         anchor = box_mid if entry_label == "high" else box_low
         sl = anchor - buffer
@@ -447,8 +510,8 @@ def structural_sl(direction, entry_label, box_low, box_mid, box_high, atr_tf):
         entry_price = {"low": box_low, "mid": box_mid, "high": box_high}[entry_label]
         dist = sl - entry_price
 
-    if dist < BOX_SL_MIN_POINTS:
-        dist = BOX_SL_MIN_POINTS
+    if dist < sl_floor:
+        dist = sl_floor
         sl = entry_price - dist if direction == "BUY" else entry_price + dist
     if dist > BOX_SL_MAX_POINTS:
         return None, None
@@ -467,7 +530,9 @@ def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None
     def _priority(b):
         if not b:
             return -1
-        return {"ready": 3, "waiting_retest": 2, "unconfirmed": 1}[b["state"]]
+        # spring_ready cao nhất: setup phá vỡ giả có điểm vô hiệu hóa rõ ràng nhất
+        return {"spring_ready": 4, "ready": 3, "spring_waiting": 2, "waiting_retest": 2,
+                "unconfirmed": 1}.get(b["state"], 0)
 
     atr_by_tf = atr_by_tf or {}
     candidates = [("H1", box_h1), ("M15", box_m15)]
@@ -513,13 +578,48 @@ def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None
     result["direction"] = box["direction"]
     result["alignment"] = box["alignment"]
     result["confirm_dir"] = box["confirm_dir"]
+    result["rejected_entries"] = []  # minh bạch: entry bị loại + lý do, hiển thị trong tin nhắn
+
+    # ---- SETUP SPRING (phá vỡ giả): 1 entry duy nhất tại biên vừa bị quét ----
+    if box["state"] in ("spring_ready", "spring_waiting"):
+        direction = box["direction"]
+        boundary = box["entries"][0]["price"]
+        sweep = box["sweep_extreme"]
+        result["sweep_extreme"] = sweep
+        buffer = BOX_SL_BUFFER_ATR * atr_tf if atr_tf and atr_tf > 0 else 1.0
+        sl_floor = max(BOX_SL_MIN_POINTS, BOX_SL_MIN_ATR * atr_tf) if atr_tf and atr_tf > 0 \
+            else BOX_SL_MIN_POINTS
+        # SL dưới đáy cú quét (BUY) / trên đỉnh cú quét (SELL) + đệm - điểm vô hiệu hóa
+        # rõ ràng nhất có thể: đáy/đỉnh quét thủng nghĩa là "phá giả" hóa ra phá thật.
+        sl = round(sweep - buffer, 2) if direction == "BUY" else round(sweep + buffer, 2)
+        dist = (boundary - sl) if direction == "BUY" else (sl - boundary)
+        if dist < sl_floor:
+            dist = sl_floor
+            sl = round(boundary - dist, 2) if direction == "BUY" else round(boundary + dist, 2)
+        if dist > BOX_SL_MAX_POINTS:
+            result["rejected_entries"].append(
+                {"label": "spring", "reason": f"SL cấu trúc {dist:.1f}p vượt trần {BOX_SL_MAX_POINTS:.0f}p"})
+            return None
+        tp1, tp2, tp3 = compute_box_tp(direction, boundary, sl)
+        result["entries"].append({
+            "label": "biên phá giả", "direction": direction, "entry": boundary, "sl": sl,
+            "sl_points": round(dist, 2), "tp1": tp1, "tp2": tp2, "tp3": tp3,
+            "risk": False, "order_kind": _order_kind(direction, boundary), "spring": True,
+        })
+        return result
+
     label_map = {"low": "cạnh dưới", "mid": "giữa biên", "high": "cạnh trên"}
     for e in box["entries"]:
         direction = box["direction"]
         sl, sl_dist = structural_sl(direction, e["label"], box["box_low"], box["box_mid"],
                                      box["box_high"], atr_tf)
         if sl is None:
-            continue  # cấu trúc quá rộng cho entry này -> bỏ, không ép SL
+            # Minh bạch hóa: ghi lý do loại thay vì biến mất trong im lặng - trước đây
+            # entry "giữa biên" của box cao > 25 giá biến mất không dấu vết, gây khó hiểu
+            result["rejected_entries"].append(
+                {"label": label_map[e["label"]],
+                 "reason": f"SL cấu trúc vượt trần {BOX_SL_MAX_POINTS:.0f}p"})
+            continue
         tp1, tp2, tp3 = compute_box_tp(direction, e["price"], sl)
         result["entries"].append({
             "label": label_map[e["label"]], "direction": direction, "entry": e["price"],
@@ -1260,6 +1360,60 @@ def update_signal_outcomes(log, df_m5, current_price):
     return log
 
 
+def detect_rejection_at_level(df_tf, level, direction, tol):
+    """
+    Nến TỪ CHỐI tại vùng entry (dùng nến ĐÃ ĐÓNG gần nhất của khung truyền vào, thường M15):
+    nến có chạm vùng entry (level +/- tol) VÀ đóng cửa quay theo hướng lệnh:
+    - BUY: low chạm vùng, đóng cửa > mở cửa và đóng phía trên level (từ chối giảm)
+    - SELL: high chạm vùng, đóng cửa < mở cửa và đóng phía dưới level (từ chối tăng)
+    Trả về True/False. Mặc định chỉ dùng để HIỂN THỊ (REQUIRE_REJECTION_CANDLE=False);
+    khi bật cờ, tín hiệu không có nến từ chối sẽ bị giữ lại chờ xác nhận.
+    """
+    if df_tf is None or len(df_tf) < 1 or tol <= 0:
+        return False
+    c = df_tf.iloc[-1]  # nến đã đóng gần nhất (resample_ohlc đã loại nến chưa đóng)
+    touched = (c["low"] - tol) <= level <= (c["high"] + tol)
+    if not touched:
+        return False
+    if direction == "BUY":
+        return c["close"] > c["open"] and c["close"] > level
+    return c["close"] < c["open"] and c["close"] < level
+
+
+def cancel_dead_premise_orders(log, df_m5):
+    """
+    Hủy lệnh CHỜ KHỚP khi TIỀN ĐỀ của nó đã chết - sửa lỗi lộ ra từ thực tế: bot treo
+    SELL Limit dựa trên cú phá đáy đã THẤT BẠI (giá quay hẳn vào trong box) mà lệnh chờ
+    vẫn sống, cách giá cả chục ATR.
+
+    Mỗi bản ghi mang sẵn cancel_level + cancel_side (đặt lúc tạo lệnh):
+    - Box thường: giá đóng cửa M5 vượt qua ĐƯỜNG GIỮA box ngược hướng lệnh -> tiền đề
+      breakout đã bị phủ nhận -> hủy.
+    - Spring: giá đóng cửa thủng đáy/đỉnh CÚ QUÉT -> "phá giả" hóa ra phá thật -> hủy.
+    Lệnh hủy ghi status='cancelled', KHÔNG tính vào thắng/thua (lệnh chưa từng khớp).
+    Chỉ áp dụng cho waiting_fill - lệnh ĐÃ khớp thì SL là cơ chế thoát, không hủy giữa chừng.
+    """
+    for rec in log:
+        if rec.get("status") != "waiting_fill":
+            continue
+        level, side = rec.get("cancel_level"), rec.get("cancel_side")
+        if level is None or side not in ("above", "below"):
+            continue
+        try:
+            start_time = datetime.fromisoformat(rec["time_iso"])
+        except Exception:
+            continue
+        candles = _candles_since(df_m5, start_time)
+        if len(candles) == 0:
+            continue
+        dead = (candles["close"] > level).any() if side == "above" else (candles["close"] < level).any()
+        if dead:
+            rec["status"] = "cancelled"
+            rec["cancel_reason"] = ("Giá đóng cửa vượt qua mức vô hiệu hóa "
+                                    f"{level:.2f} - tiền đề setup không còn, hủy lệnh chờ")
+    return log
+
+
 def manage_active_trades_before_append(log, sig, current_price):
     """
     Quản lý lệnh đang chạy khi có tín hiệu MỚI cùng chiều + cùng loại. 3 quy tắc ĐÃ SỬA:
@@ -1361,6 +1515,10 @@ def append_signal(log, sig):
         # nhóm điểm cao/thấp sau 30-50 lệnh (mục đích tồn tại của hệ điểm này)
         "ctx_score": sig["ctx"]["score"] if sig.get("ctx") else None,
         "ctx_votes": sig["ctx"]["votes"] if sig.get("ctx") else None,
+        # Mức vô hiệu hóa tiền đề: lệnh chờ tự HỦY khi giá đóng cửa vượt qua mức này
+        # (box thường = đường giữa box; spring = đáy/đỉnh cú quét)
+        "cancel_level": sig.get("cancel_level"),
+        "cancel_side": sig.get("cancel_side"),
     }
     if initial_status == "pending":
         rec["fill_time_iso"] = now_iso
@@ -2111,10 +2269,12 @@ def generate_signal(active_zone_directions=None):
         block_reason = "Thị trường đang đứng yên (nghỉ lễ/ngoài giờ giao dịch thực) - dữ liệu gần như không đổi, tạm dừng phân tích"
     elif not box_signal:
         block_reason = "Chưa tìm thấy nến tập trung thanh khoản nào đủ điều kiện trong phạm vi quét"
-    elif box_signal["state"] == "ready":
+    elif box_signal["state"] in ("ready", "spring_ready"):
         direction = box_signal["direction"]
         signal_mode = "box"
-        if box_signal["alignment"] == "ngược":
+        if box_signal["alignment"] == "spring":
+            pass  # setup Spring có khối hiển thị riêng đầy đủ trong tin nhắn, không cần note
+        elif box_signal["alignment"] == "ngược":
             confidence = "low"
             confidence_notes.append("Lệnh NGƯỢC xu hướng của nến thanh khoản (chỉ 2 điểm entry, thận trọng hơn)")
         # Bối cảnh NGHỊCH MẠNH (điểm <= -3) -> hạ độ tin cậy. Thay thế 2 quy tắc ad-hoc cũ
@@ -2124,7 +2284,10 @@ def generate_signal(active_zone_directions=None):
             confidence = "low"
             confidence_notes.append(f"Bối cảnh NGHỊCH MẠNH ({ctx['score']:+d}: {ctx['icon_line']}) - rủi ro cao hơn hẳn")
     else:
-        state_txt = "chưa xác nhận breakout" if box_signal["state"] == "unconfirmed" else "đã xác nhận, đang chờ giá quay về test biên"
+        state_txt = {"unconfirmed": "chưa xác nhận breakout",
+                     "waiting_retest": "đã xác nhận, đang chờ giá quay về test biên",
+                     "spring_waiting": "PHÁ VỠ GIẢ phát hiện, chờ giá quay về biên bị quét",
+                     }.get(box_signal["state"], box_signal["state"])
         block_reason = f"Có box {box_signal['tf']} ({state_txt}) - xem chi tiết box bên dưới"
 
     if direction and news_warning:
@@ -2222,29 +2385,62 @@ def generate_signal(active_zone_directions=None):
 
     result["df_m5"] = df_m5  # dùng cho theo dõi kết quả path-aware ở vòng chạy chính
 
-    if box_signal and box_signal["state"] == "ready" and box_signal.get("entries"):
-        # Entry ĐẦU TIÊN trong danh sách làm đại diện theo dõi thắng/thua (các entry còn lại
-        # hiển thị đầy đủ trong tin nhắn để bạn tự chọn/vào thang, nhưng chỉ 1 được log lại).
-        primary = box_signal["entries"][0]
+    if box_signal and box_signal["state"] in ("ready", "spring_ready") and box_signal.get("entries"):
+        # Entry GẦN GIÁ NHẤT làm đại diện theo dõi thắng/thua - hợp lý hơn "entry đầu tiên"
+        # cũ: entry gần nhất là lệnh có xác suất khớp cao nhất, thống kê phản ánh sát thực tế.
+        primary = min(box_signal["entries"], key=lambda e: abs(current_price - e["entry"]))
+        dist_atr = abs(current_price - primary["entry"]) / atr_m5 if atr_m5 > 0 else 0
+
+        # CHẶN ENTRY QUÁ XA: entry gần nhất cách giá > 4x ATR -> gần như chắc chắn hết hạn
+        # vô nghĩa (thực tế: lệnh cách 10.9x ATR, còn 3.9h - không bao giờ khớp). Không phát
+        # lệnh, chỉ hiển thị box tham khảo.
+        if dist_atr > FAR_ENTRY_ATR:
+            result["direction"] = None
+            result["block_reason"] = (f"Entry gần nhất ({primary['entry']:.2f}) cách giá "
+                                       f"{dist_atr:.1f}x ATR - ngoài tầm với, không phát lệnh "
+                                       f"(box vẫn hiển thị để theo dõi)")
+            return result
+
+        # NẾN TỪ CHỐI tại vùng entry (M15): chạm vùng entry và đóng cửa quay theo hướng lệnh.
+        # Mặc định chỉ HIỂN THỊ thông tin; bật REQUIRE_REJECTION_CANDLE=True để bắt buộc.
+        rejection_ok = detect_rejection_at_level(df_m15, primary["entry"], primary["direction"],
+                                                  tol=0.3 * atr_m5)
+        result["rejection_candle"] = rejection_ok
+        if REQUIRE_REJECTION_CANDLE and not rejection_ok:
+            result["direction"] = None
+            result["block_reason"] = ("Chưa có nến từ chối M15 tại vùng entry "
+                                       "(REQUIRE_REJECTION_CANDLE đang bật) - chờ xác nhận")
+            return result
+
+        # Mức HỦY LỆNH CHỜ (tiền đề chết): box thường = đường giữa box (ngược hướng lệnh);
+        # spring = đáy/đỉnh cú quét (thủng = phá giả hóa ra phá thật).
+        if box_signal["alignment"] == "spring":
+            cancel_level = box_signal.get("sweep_extreme")
+            cancel_side = "below" if primary["direction"] == "BUY" else "above"
+        else:
+            cancel_level = box_signal["box_mid"]
+            cancel_side = "above" if primary["direction"] == "SELL" else "below"
+
+        fp_suffix = ":SPRING" if box_signal["alignment"] == "spring" else ""
         result.update({
             "entry": primary["entry"], "sl": primary["sl"],
             "tp1": primary["tp1"], "tp2": primary["tp2"], "tp3": primary["tp3"],
             "entry_type": "limit",
             "order_kind": primary.get("order_kind", "limit"),
-            # Vân tay box: khung + biên (làm tròn 1 số lẻ) + hướng - đủ ổn định giữa các lần
-            # chạy (biên box không đổi) để chống giao dịch trùng cùng 1 box nhiều lần.
+            "cancel_level": round(cancel_level, 2) if cancel_level is not None else None,
+            "cancel_side": cancel_side,
+            # Vân tay box: khung + biên (làm tròn 1 số lẻ) + hướng (+SPRING nếu là phá vỡ giả -
+            # cùng 1 box có thể có cả lệnh breakout lẫn lệnh spring hợp lệ, không được chặn nhau)
             "fingerprint": f"{box_signal['tf']}:{box_signal['box_low']:.1f}-"
-                           f"{box_signal['box_high']:.1f}:{box_signal['direction']}",
+                           f"{box_signal['box_high']:.1f}:{box_signal['direction']}{fp_suffix}",
         })
         result["fib_note"] = fib_confluence_note(fib, primary["entry"], primary["sl"], primary["tp1"], atr_m5)
 
-        # Cảnh báo "không mua đuổi": giá hiện tại cách entry quá xa (>= 2.5x ATR M5)
+        # Cảnh báo "không mua đuổi": giá hiện tại cách entry khá xa (2.5-4x ATR M5)
         # -> nhấn mạnh đây là lệnh CHỜ, tuyệt đối không vào market đuổi theo.
-        if atr_m5 > 0:
-            dist_atr = abs(current_price - primary["entry"]) / atr_m5
-            if dist_atr >= CHASE_WARNING_ATR:
-                result["chase_warning"] = (f"Giá đang cách entry {dist_atr:.1f}x ATR - "
-                                            f"CHỜ GIÁ VỀ {primary['entry']:.2f}, không đuổi lệnh!")
+        if dist_atr >= CHASE_WARNING_ATR:
+            result["chase_warning"] = (f"Giá đang cách entry {dist_atr:.1f}x ATR - "
+                                        f"CHỜ GIÁ VỀ {primary['entry']:.2f}, không đuổi lệnh!")
 
     return result
 
@@ -2294,8 +2490,10 @@ def format_message(sig, win_stats=None, active_trades=None):
     box = sig.get("box_signal")
     if box:
         state_label = {"ready": "SẴN SÀNG ENTRY", "waiting_retest": "CHỜ RETEST",
-                       "unconfirmed": "CHƯA XÁC NHẬN"}[box["state"]]
-        header_emoji = "🆕" if box["state"] == "ready" else "📦"
+                       "unconfirmed": "CHƯA XÁC NHẬN",
+                       "spring_ready": "PHÁ VỠ GIẢ ⚡ SẴN SÀNG ENTRY",
+                       "spring_waiting": "PHÁ VỠ GIẢ - CHỜ GIÁ VỀ BIÊN"}.get(box["state"], box["state"])
+        header_emoji = "🆕" if box["state"] in ("ready", "spring_ready") else "📦"
         lines.append(section_header(header_emoji, f"BOX {box['tf']} - {state_label}"))
         color_txt = "🟢 XANH" if box["color"] == "green" else "🔴 ĐỎ"
         lines.append(f"Nến thanh khoản {color_txt}   |   Biên: {box['box_low']:.2f} – {box['box_high']:.2f}")
@@ -2334,6 +2532,21 @@ def format_message(sig, win_stats=None, active_trades=None):
                     lines.append(f"      📍 E: {e['entry']:.2f}")
                     lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p)")
                     lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
+        elif box["state"] in ("spring_ready", "spring_waiting"):
+            broke_txt = "đáy" if box["confirm_dir"] == "down" else "đỉnh"
+            lines.append(f"⚡ Phá {broke_txt} THẤT BẠI: giá đóng cửa quay lại TRONG box trong "
+                          f"{SPRING_WINDOW} nến -> cú phá là QUÉT STOP LOSS (Spring)")
+            lines.append(f"   Đáy/đỉnh cú quét: {box.get('sweep_extreme', 0):.2f} - thủng mức này = setup vô hiệu")
+            for e in box["entries"]:
+                kind_txt = "⏳ CHỜ GIÁ VỀ" if e.get("order_kind", "limit") == "limit" else "⏳ CHỜ GIÁ VƯỢT QUA"
+                sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
+                lines.append(f"   📍 E({e['label']}): {e['entry']:.2f}  {kind_txt}")
+                lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p - sau {broke_txt} cú quét)")
+                lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
+            if box["state"] == "spring_waiting":
+                lines.append("⏳ Chờ giá quay về biên bị quét để entry - chưa vào lệnh")
+            else:
+                lines.append("✅ Giá đang tại biên bị quét - đặt lệnh CHỜ, KHÔNG vào market đuổi giá")
         else:
             align_txt = "THUẬN xu hướng" if box["alignment"] == "thuận" else "NGƯỢC xu hướng (thận trọng hơn)"
             lines.append(f"Xác nhận phá {'đỉnh' if box['confirm_dir']=='up' else 'đáy'} -> "
@@ -2348,6 +2561,14 @@ def format_message(sig, win_stats=None, active_trades=None):
                 lines.append("⏳ Đã xác nhận nhưng giá CHƯA quay về test biên - chưa nên vào lệnh")
             else:
                 lines.append("✅ Giá ĐÃ quay về test - đặt lệnh CHỜ tại entry, KHÔNG vào market đuổi giá")
+
+        # Minh bạch: entry bị bộ lọc SL loại - hiện lý do thay vì biến mất trong im lặng
+        for rej in box.get("rejected_entries", []):
+            lines.append(f"🚫 Entry ({rej['label']}) bị loại - {rej['reason']}")
+
+        # Nến từ chối M15 tại vùng entry: có -> tín hiệu chất lượng hơn (hiện tham khảo)
+        if sig.get("rejection_candle"):
+            lines.append("🕯️ Nến từ chối M15 tại vùng entry ✓ (chạm và đóng cửa quay theo hướng lệnh)")
 
         if sig.get("chase_warning"):
             lines.append(f"⚖️ {sig['chase_warning']}")
@@ -2463,7 +2684,8 @@ def generate_box_chart(df, box, filename="box_chart.png", lookback_candles=40):
         ax.axhline(box["box_low"], color="gray", linestyle="--", linewidth=0.8)
         if box["state"] != "unconfirmed":
             ax.axhline(box["box_mid"], color="gray", linestyle=":", linewidth=0.6)
-        state_txt = {"ready": "SẴN SÀNG", "waiting_retest": "CHỜ RETEST", "unconfirmed": "CHƯA XÁC NHẬN"}[box["state"]]
+        state_txt = {"ready": "SẴN SÀNG", "waiting_retest": "CHỜ RETEST", "unconfirmed": "CHƯA XÁC NHẬN",
+                     "spring_ready": "PHÁ VỠ GIẢ - SẴN SÀNG", "spring_waiting": "PHÁ VỠ GIẢ - CHỜ"}.get(box["state"], box["state"])
         ax.set_title(f"XAU/USD - Box {box['tf']} ({state_txt})")
     else:
         ax.set_title("XAU/USD")
@@ -2519,6 +2741,8 @@ if __name__ == "__main__":
     # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
     # (path-aware: duyệt high/low từng nến M5 kể từ lúc tạo/khớp lệnh, không chỉ giá hiện tại)
     log = update_signal_outcomes(log, signal["df_m5"], signal["price"])
+    # Hủy các lệnh chờ có tiền đề đã chết (breakout bị phủ nhận / phá giả hóa phá thật)
+    log = cancel_dead_premise_orders(log, signal["df_m5"])
 
     # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
     log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
@@ -2546,7 +2770,8 @@ if __name__ == "__main__":
             box = signal["box_signal"]
             chart_path = generate_box_chart(signal["box_chart_df"], box)
             state_txt = {"ready": "Sẵn sàng entry", "waiting_retest": "Chờ retest",
-                         "unconfirmed": "Chưa xác nhận"}[box["state"]]
+                         "unconfirmed": "Chưa xác nhận", "spring_ready": "Phá vỡ giả - sẵn sàng",
+                         "spring_waiting": "Phá vỡ giả - chờ giá về biên"}.get(box["state"], box["state"])
             send_telegram_photo(chart_path, caption=f"📊 Box {box['tf']} - {state_txt}")
             print("Đã gửi ảnh biểu đồ.")
         except Exception as e:
