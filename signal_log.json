@@ -24,5 +24,29 @@
     },
     "fill_time_iso": "2026-07-14T22:30:00+00:00",
     "usd": -25.02
+  },
+  {
+    "time_iso": "2026-07-14T13:01:07.587617+00:00",
+    "direction": "SELL",
+    "entry": 4078.4739600000003,
+    "sl": 4097.94,
+    "tp1": 4059.01,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4070.41345,
+    "order_kind": "limit",
+    "fingerprint": "H1:4065.5-4091.4:SELL",
+    "ctx_score": -1,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": 1,
+      "EMA": -1,
+      "MACD": -1,
+      "RSI": 0
+    }
   }
 ]
