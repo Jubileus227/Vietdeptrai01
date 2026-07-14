@@ -35,7 +35,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4070.41345,
     "order_kind": "limit",
@@ -47,6 +47,8 @@
       "EMA": -1,
       "MACD": -1,
       "RSI": 0
-    }
+    },
+    "fill_time_iso": "2026-07-14T22:30:00+00:00",
+    "usd": -97.33
   }
 ]
