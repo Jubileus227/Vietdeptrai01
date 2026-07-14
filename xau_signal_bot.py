@@ -80,11 +80,16 @@ def get_ohlc(interval, outputsize=100):
     return df
 
 
-def resample_ohlc(df_m5, rule):
+def resample_ohlc(df_m5, rule, drop_incomplete=True):
     """
     Gộp nến M5 thành khung lớn hơn (15min/30min/1h) NGAY TRONG MÁY,
     không cần gọi thêm API -> tiết kiệm request, cho phép chạy nhanh hơn.
     rule: '15min', '30min', '1h'
+
+    drop_incomplete=True: LOẠI BỎ nến cuối nếu nó CHƯA ĐÓNG (khung thời gian của nó chưa
+    trôi qua hết so với nến M5 mới nhất). Trước đây nến H1 mới chạy được 10 phút vẫn được
+    dùng để "xác nhận nến đóng cửa ngoài box" -> xác nhận GIẢ (nến đó có thể rút chân quay
+    về trong box sau đó), tín hiệu nhấp nháy giữa các lần chạy 5 phút.
     """
     df = df_m5.set_index("datetime")
     out = df.resample(rule).agg({
@@ -93,7 +98,15 @@ def resample_ohlc(df_m5, rule):
         "low": "min",
         "close": "last",
     }).dropna()
-    return out.reset_index()
+    out = out.reset_index()
+    if drop_incomplete and len(out) > 0:
+        # Nến resample cuối được coi là ĐÃ ĐÓNG khi: thời điểm bắt đầu + độ dài khung
+        # <= thời điểm kết thúc của nến M5 mới nhất (= datetime nến M5 cuối + 5 phút)
+        last_m5_end = df_m5["datetime"].iloc[-1] + pd.Timedelta(minutes=5)
+        bar_end = out["datetime"].iloc[-1] + pd.Timedelta(rule)
+        if bar_end > last_m5_end:
+            out = out.iloc[:-1].reset_index(drop=True)
+    return out
 
 
 # ============================================================
@@ -190,8 +203,7 @@ def detect_bos_level(df, lookback=20):
 BOX_LOOKBACK = 100          # số nến quét ngược để tìm nến thanh khoản
 BOX_RANGE_ATR_MULT = 2.0    # nến thanh khoản phải có biên độ >= 2x ATR trung bình gần đó
 BOX_RETEST_TOLERANCE_ATR = 0.3  # giá được coi là "đã quay về test" nếu cách điểm entry <= 0.3x ATR
-BOX_SL_CONFIRMED = 20       # SL cho entry đã xác nhận (giá) - theo đúng bảng đã thống nhất
-BOX_SL_RISK = 10            # SL cho entry rủi ro (box chưa xác nhận) - giá
+# (SL cố định 20/10 giá cũ đã bỏ - SL giờ tính theo CẤU TRÚC box, xem structural_sl bên dưới)
 BOX_MAX_DISTANCE_ATR = 8.0  # box cách giá hiện tại quá xa (theo ATR HIỆN TẠI) thì coi là hết liên quan
 BOX_MIDDLE_ZONE_RATIO = 0.5  # giá nằm trong 50% khoảng giữa box (chưa xác nhận) -> không khuyến khích vào lệnh
 
@@ -325,12 +337,13 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
                 "color": color, "state": "unconfirmed", "in_middle": in_middle}
 
     confirm_dir = None
+    confirm_idx = None
     for j in range(len(after)):
         c = after.iloc[j]
         if c["close"] > merged["outer_high"]:
-            confirm_dir = "up"; break
+            confirm_dir = "up"; confirm_idx = j; break
         if c["close"] < merged["outer_low"]:
-            confirm_dir = "down"; break
+            confirm_dir = "down"; confirm_idx = j; break
 
     if confirm_dir is None:
         return {"box_high": box_high, "box_low": box_low, "box_mid": box_mid,
@@ -362,8 +375,20 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
     label_price = {"low": box_low, "high": box_high, "mid": box_mid}
     entries = [{"label": lbl, "price": label_price[lbl]} for lbl in entry_labels]
 
+    # RETEST theo ĐƯỜNG ĐI của giá: xét high/low của TẤT CẢ nến SAU nến xác nhận breakout -
+    # nếu bất kỳ nến nào đã chạm về vùng entry (trong dung sai) thì coi là ĐÃ retest, kể cả
+    # khi cú chạm xảy ra giữa 2 lần bot chạy (trước đây chỉ so giá tại đúng thời điểm chạy
+    # -> bỏ lỡ hầu hết cú retest diễn ra trong chu kỳ 5 phút).
     tol = retest_tolerance_atr * atr_now if atr_now > 0 else 0
-    retested = tol > 0 and any(abs(current_price - e["price"]) <= tol for e in entries)
+    retested = False
+    if tol > 0 and confirm_idx is not None:
+        post_confirm = after.iloc[confirm_idx + 1:]
+        for e in entries:
+            level = e["price"]
+            touched = ((post_confirm["low"] - tol <= level) & (level <= post_confirm["high"] + tol)).any()
+            if touched or abs(current_price - level) <= tol:
+                retested = True
+                break
 
     return {
         "box_high": box_high, "box_low": box_low, "box_mid": box_mid, "color": color,
@@ -373,54 +398,96 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
     }
 
 
-BOX_TP1_MIN = 5.0           # TP1 tối thiểu (giá) - box nhỏ
-BOX_TP1_MAX = 10.0          # TP1 tối đa (giá) - box lớn
-BOX_TP1_HEIGHT_LOW = 15.0   # chiều cao box được coi là "nhỏ" (TP1 = mức tối thiểu)
-BOX_TP1_HEIGHT_HIGH = 50.0  # chiều cao box được coi là "lớn" (TP1 = mức tối đa)
+# ---- HỆ TP/SL MỚI: TP tính theo bội số R (R = khoảng cách SL), SL neo vào CẤU TRÚC box ----
+# Thay cho TP cố định 5-10 giá + SL cố định 10/20 giá cũ (R:R nghịch 2:1 đến 4:1, kỳ vọng
+# âm cài sẵn). Chuẩn mới: TP1 = 1R tối thiểu, TP2 = 1.8R, TP3 = 2.8R - thắng 1 lệnh đủ bù
+# 1 lệnh thua ngay từ TP1.
+BOX_RR_MULTIPLES = (1.0, 1.8, 2.8)   # TP1/TP2/TP3 theo bội số R
+BOX_SL_BUFFER_ATR = 0.3              # đệm SL ngoài mức cấu trúc = 0.3x ATR khung của box
+BOX_SL_MIN_POINTS = 5.0              # SL cấu trúc quá sát (nhiễu quét dễ) -> nới ra tối thiểu 5 giá
+BOX_SL_MAX_POINTS = 25.0             # SL cấu trúc quá rộng -> BỎ QUA entry đó (không ép SL, không vào lệnh xấu)
+BOX_SL_RISK_ATR = 0.75               # entry rủi ro (box chưa xác nhận): SL = 0.75x ATR, kẹp [5, 12]
+BOX_SL_RISK_MIN = 5.0
+BOX_SL_RISK_MAX = 12.0
+CHASE_WARNING_ATR = 2.5              # giá cách entry >= 2.5x ATR -> cảnh báo "chờ giá về, không đuổi"
 
 
-def compute_box_tp(direction, entry, box_height, multiples=(1.0, 2.0, 3.0)):
+def compute_box_tp(direction, entry, sl, multiples=BOX_RR_MULTIPLES):
     """
-    TP1 CHỈ 5-10 giá (không phải cả chiều cao box như trước - quá xa, hiếm khi chạm tới) -
-    nội suy theo box nhỏ hay lớn: box nhỏ -> TP1 gần mức tối thiểu (5 giá), box lớn -> TP1
-    gần mức tối đa (10 giá). TP2/TP3 tăng dần theo bội số của khoảng TP1 này (không phải
-    theo chiều cao box nữa) - giữ tỷ lệ chốt lời từng phần hợp lý mà vẫn khả thi hơn nhiều.
+    TP theo bội số R: R = |entry - SL|. TP1 = entry + 1R, TP2 = +1.8R, TP3 = +2.8R (BUY;
+    SELL ngược lại). SL đã được tính theo cấu trúc box trước đó nên TP tự thích ứng theo
+    độ rộng cấu trúc - box lớn SL rộng thì TP cũng xa tương ứng, giữ R:R luôn >= 1:1.
     """
-    if box_height <= BOX_TP1_HEIGHT_LOW:
-        tp1_distance = BOX_TP1_MIN
-    elif box_height >= BOX_TP1_HEIGHT_HIGH:
-        tp1_distance = BOX_TP1_MAX
-    else:
-        ratio = (box_height - BOX_TP1_HEIGHT_LOW) / (BOX_TP1_HEIGHT_HIGH - BOX_TP1_HEIGHT_LOW)
-        tp1_distance = BOX_TP1_MIN + ratio * (BOX_TP1_MAX - BOX_TP1_MIN)
-
+    r = abs(entry - sl)
     if direction == "BUY":
-        return tuple(round(entry + tp1_distance * m, 2) for m in multiples)
-    return tuple(round(entry - tp1_distance * m, 2) for m in multiples)
+        return tuple(round(entry + r * m, 2) for m in multiples)
+    return tuple(round(entry - r * m, 2) for m in multiples)
 
 
-def build_box_signal(box_m15, box_h1, atr_m5):
+def structural_sl(direction, entry_label, box_low, box_mid, box_high, atr_tf):
+    """
+    SL neo vào mức CẤU TRÚC gần nhất phía dưới entry (BUY) / phía trên entry (SELL),
+    cộng đệm 0.3x ATR - thay cho số cố định 20 giá cũ:
+    - BUY tại cạnh trên  -> SL dưới ĐƯỜNG GIỮA box (mid)
+    - BUY tại giữa biên  -> SL dưới CẠNH DƯỚI box
+    - BUY tại cạnh dưới  -> SL dưới CẠNH DƯỚI box
+    (SELL đối xứng ngược lại)
+    Trả về (giá SL, khoảng cách SL) - hoặc (None, None) nếu khoảng cách vượt trần
+    BOX_SL_MAX_POINTS: cấu trúc quá rộng, entry này không đáng vào, bỏ qua thay vì ép SL.
+    """
+    buffer = BOX_SL_BUFFER_ATR * atr_tf if atr_tf and atr_tf > 0 else BOX_SL_MIN_POINTS * 0.2
+    if direction == "BUY":
+        anchor = box_mid if entry_label == "high" else box_low
+        sl = anchor - buffer
+        entry_price = {"low": box_low, "mid": box_mid, "high": box_high}[entry_label]
+        dist = entry_price - sl
+    else:
+        anchor = box_mid if entry_label == "low" else box_high
+        sl = anchor + buffer
+        entry_price = {"low": box_low, "mid": box_mid, "high": box_high}[entry_label]
+        dist = sl - entry_price
+
+    if dist < BOX_SL_MIN_POINTS:
+        dist = BOX_SL_MIN_POINTS
+        sl = entry_price - dist if direction == "BUY" else entry_price + dist
+    if dist > BOX_SL_MAX_POINTS:
+        return None, None
+    return round(sl, 2), round(dist, 2)
+
+
+def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None):
     """
     Chọn box CHÍNH để giao dịch - ưu tiên box đã 'ready' (sẵn sàng entry), khung H1 trước
     (cấu trúc lớn hơn, đáng tin hơn), rồi tới M15. Nếu không box nào 'ready', vẫn chọn 1 box
     để hiển thị bối cảnh (ready > waiting_retest > unconfirmed), ưu tiên H1.
-    Trả về dict mô tả đầy đủ box đã chọn + danh sách entry cụ thể (giá, SL, TP, nhãn) để hiển thị.
+    SL từng entry tính theo CẤU TRÚC box (structural_sl) - entry nào SL cấu trúc quá rộng
+    (> BOX_SL_MAX_POINTS) bị LOẠI thay vì ép SL. TP theo bội số R. Mỗi entry kèm loại lệnh
+    chờ (limit/stop) so với giá hiện tại - dùng cho logic khớp lệnh path-aware sau này.
     """
     def _priority(b):
         if not b:
             return -1
         return {"ready": 3, "waiting_retest": 2, "unconfirmed": 1}[b["state"]]
 
+    atr_by_tf = atr_by_tf or {}
     candidates = [("H1", box_h1), ("M15", box_m15)]
     candidates.sort(key=lambda x: _priority(x[1]), reverse=True)
     tf_name, box = candidates[0]
     if not box:
         return None
 
-    box_height = box["box_high"] - box["box_low"]
+    atr_tf = atr_by_tf.get(tf_name, atr_m5)
     result = {"tf": tf_name, "box_high": box["box_high"], "box_low": box["box_low"],
               "box_mid": box["box_mid"], "color": box["color"], "state": box["state"],
               "entries": []}
+
+    def _order_kind(direction, entry_price):
+        """Limit = chờ giá QUAY VỀ entry; Stop = chờ giá VƯỢT QUA entry theo hướng lệnh."""
+        if current_price is None:
+            return "limit"
+        if direction == "BUY":
+            return "limit" if entry_price <= current_price else "stop"
+        return "limit" if entry_price >= current_price else "stop"
 
     if box["state"] == "unconfirmed":
         result["in_middle"] = box.get("in_middle", False)
@@ -428,29 +495,39 @@ def build_box_signal(box_m15, box_h1, atr_m5):
             # Giá đang ở GIỮA box (không gần biên nào) - KHÔNG khuyến khích vào lệnh vì chưa
             # rõ hướng và không có điểm tham chiếu hợp lý để đặt SL/TP lúc này.
             return result
-        # Entry RỦI RO: fade 2 cạnh (chưa rõ hướng breakout), SL nhỏ hơn (10 giá)
+        # Entry RỦI RO: fade 2 cạnh (chưa rõ hướng breakout) - SL theo ATR khung của box,
+        # kẹp trong [BOX_SL_RISK_MIN, BOX_SL_RISK_MAX] thay cho số cố định 10 giá cũ.
+        risk_dist = min(max(BOX_SL_RISK_ATR * atr_tf, BOX_SL_RISK_MIN), BOX_SL_RISK_MAX) \
+            if atr_tf and atr_tf > 0 else BOX_SL_RISK_MIN
         for label, price, direction in (("cạnh trên", box["box_high"], "SELL"),
                                          ("cạnh dưới", box["box_low"], "BUY")):
-            sl = price + BOX_SL_RISK if direction == "SELL" else price - BOX_SL_RISK
-            tp1, tp2, tp3 = compute_box_tp(direction, price, box_height)
+            sl = round(price + risk_dist, 2) if direction == "SELL" else round(price - risk_dist, 2)
+            tp1, tp2, tp3 = compute_box_tp(direction, price, sl)
             result["entries"].append({
                 "label": label, "direction": direction, "entry": price, "sl": sl,
-                "tp1": tp1, "tp2": tp2, "tp3": tp3, "risk": True,
+                "sl_points": round(risk_dist, 2), "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                "risk": True, "order_kind": _order_kind(direction, price),
             })
         return result
 
     result["direction"] = box["direction"]
     result["alignment"] = box["alignment"]
     result["confirm_dir"] = box["confirm_dir"]
+    label_map = {"low": "cạnh dưới", "mid": "giữa biên", "high": "cạnh trên"}
     for e in box["entries"]:
         direction = box["direction"]
-        sl = e["price"] - BOX_SL_CONFIRMED if direction == "BUY" else e["price"] + BOX_SL_CONFIRMED
-        tp1, tp2, tp3 = compute_box_tp(direction, e["price"], box_height)
-        label_map = {"low": "cạnh dưới", "mid": "giữa biên", "high": "cạnh trên"}
+        sl, sl_dist = structural_sl(direction, e["label"], box["box_low"], box["box_mid"],
+                                     box["box_high"], atr_tf)
+        if sl is None:
+            continue  # cấu trúc quá rộng cho entry này -> bỏ, không ép SL
+        tp1, tp2, tp3 = compute_box_tp(direction, e["price"], sl)
         result["entries"].append({
-            "label": label_map[e["label"]], "direction": direction, "entry": e["price"], "sl": sl,
-            "tp1": tp1, "tp2": tp2, "tp3": tp3, "risk": False,
+            "label": label_map[e["label"]], "direction": direction, "entry": e["price"],
+            "sl": sl, "sl_points": sl_dist, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+            "risk": False, "order_kind": _order_kind(direction, e["price"]),
         })
+    if not result["entries"]:
+        return None  # mọi entry đều bị loại vì SL cấu trúc quá rộng -> không có gì để giao dịch
     return result
 
 
@@ -1067,12 +1144,37 @@ def save_signal_log(log):
         json.dump(log, f, ensure_ascii=False, indent=2)
 
 
-def update_signal_outcomes(log, current_price):
+def _candles_since(df_m5, start_time_utc):
     """
-    Kiểm tra các tín hiệu cũ:
-    - 'waiting_fill' (lệnh limit "chờ giá về"): kiểm tra giá đã pullback đủ để khớp lệnh chưa.
-      CHƯA khớp thì CHƯA tính thắng/thua - tránh đếm nhầm lệnh chưa từng vào.
-    - 'pending' (đã khớp - lệnh market, hoặc limit đã khớp): kiểm tra chạm TP1/SL/hết hạn như cũ.
+    Lấy các nến M5 có thời điểm >= start_time_utc. Datetime của Twelve Data trả về dạng
+    naive (mặc định UTC với forex/kim loại) - localize sang UTC để so sánh được với
+    time_iso (UTC aware) trong log.
+    """
+    dt = df_m5["datetime"]
+    if dt.dt.tz is None:
+        dt = dt.dt.tz_localize("UTC")
+    mask = dt >= start_time_utc
+    out = df_m5.loc[mask].copy()
+    out["datetime_utc"] = dt[mask]
+    return out.reset_index(drop=True)
+
+
+def update_signal_outcomes(log, df_m5, current_price):
+    """
+    Kiểm tra các tín hiệu cũ theo ĐƯỜNG ĐI GIÁ THẬT (high/low từng nến M5 kể từ lúc tạo
+    tín hiệu) thay vì chỉ 1 điểm giá tại thời điểm bot chạy như trước - sửa 2 lỗi lớn:
+    1. TP/SL bị chạm GIỮA 2 lần chạy (chu kỳ 5 phút) trước đây bị bỏ lỡ hoàn toàn.
+    2. Không có path-dependency: nếu giá chạm SL trước rồi mới lên TP, bản cũ có thể ghi
+       nhầm thành thắng. Bản này duyệt nến theo thứ tự thời gian - cái nào chạm TRƯỚC tính trước.
+
+    Quy tắc thận trọng: nếu CÙNG 1 nến M5 quét cả SL lẫn TP (không phân định được cái nào
+    trước) -> tính là THUA. Thà thống kê khắt khe hơn thực tế còn hơn tự lừa mình.
+
+    Khớp lệnh chờ ('waiting_fill') cũng theo path và ĐÚNG loại lệnh:
+    - BUY limit (entry DƯỚI giá lúc tạo): khớp khi low nến <= entry (giá giảm về)
+    - BUY stop  (entry TRÊN giá lúc tạo): khớp khi high nến >= entry (giá vượt lên)
+    - SELL đối xứng. Trước đây mọi lệnh đều coi là limit -> lệnh bản chất là stop bị
+      "khớp ảo" ngay lập tức tại mức giá không có thật, làm méo toàn bộ thống kê.
     """
     now = datetime.now(timezone.utc)
     for rec in log:
@@ -1085,55 +1187,95 @@ def update_signal_outcomes(log, current_price):
             rec["status"] = "expired"
             continue
 
-        timeout = rec.get("timeout_hours", SIGNAL_TIMEOUT_HOURS)  # Zone Setup có thời hạn riêng (ngắn/trung/dài)
+        timeout = rec.get("timeout_hours", SIGNAL_TIMEOUT_HOURS)
+        direction = rec["direction"]
+        entry, sl, tp1 = rec["entry"], rec["sl"], rec["tp1"]
 
-        if status == "waiting_fill":
-            direction = rec["direction"]
-            entry = rec["entry"]
-            # BUY limit: chờ giá GIẢM về entry. SELL limit: chờ giá TĂNG về entry.
-            filled = (direction == "BUY" and current_price <= entry) or \
-                     (direction == "SELL" and current_price >= entry)
-            if filled:
-                rec["status"] = "pending"  # đã khớp -> từ giờ mới bắt đầu tính thắng/thua
-            elif trading_hours_elapsed(rec_time, now) > timeout:
-                rec["status"] = "expired"  # giá không bao giờ pullback về -> lệnh chưa từng vào, bỏ qua
-            continue  # dù khớp hay chưa, vòng lặp này chưa xét thắng/thua
+        # Bản ghi cũ (trước nâng cấp) không có order_kind/signal_price -> suy ra hợp lý nhất
+        order_kind = rec.get("order_kind")
+        if order_kind is None:
+            sig_price = rec.get("signal_price")
+            if sig_price is not None:
+                if direction == "BUY":
+                    order_kind = "limit" if entry <= sig_price else "stop"
+                else:
+                    order_kind = "limit" if entry >= sig_price else "stop"
+            else:
+                order_kind = "limit"
 
-        # status == "pending": đã khớp lệnh thật sự, xét thắng/thua như bình thường
-        if rec["direction"] == "BUY":
-            if current_price >= rec["tp1"]:
+        # Mốc bắt đầu duyệt nến: lệnh đã khớp thì từ lúc khớp, chưa khớp thì từ lúc tạo
+        start_iso = rec.get("fill_time_iso", rec["time_iso"]) if status == "pending" else rec["time_iso"]
+        try:
+            start_time = datetime.fromisoformat(start_iso)
+        except Exception:
+            start_time = rec_time
+
+        candles = _candles_since(df_m5, start_time)
+
+        filled = (status == "pending")
+        for _, c in candles.iterrows():
+            lo, hi = c["low"], c["high"]
+
+            if not filled:
+                if direction == "BUY":
+                    hit = (order_kind == "limit" and lo <= entry) or \
+                          (order_kind == "stop" and hi >= entry)
+                else:
+                    hit = (order_kind == "limit" and hi >= entry) or \
+                          (order_kind == "stop" and lo <= entry)
+                if not hit:
+                    continue
+                filled = True
+                rec["status"] = "pending"
+                rec["fill_time_iso"] = c["datetime_utc"].isoformat()
+                # nến khớp lệnh CŨNG có thể quét luôn SL/TP -> tiếp tục kiểm tra ngay bên dưới
+
+            # Đã khớp -> kiểm tra SL/TP trên nến này (cùng nến chạm cả 2 -> tính SL, thận trọng)
+            if direction == "BUY":
+                hit_sl, hit_tp = lo <= sl, hi >= tp1
+            else:
+                hit_sl, hit_tp = hi >= sl, lo <= tp1
+
+            if hit_sl:
+                usd = round((sl - entry) * USD_PER_POINT, 2) if direction == "BUY" \
+                    else round((entry - sl) * USD_PER_POINT, 2)
+                # SL đã được dời về entry (cơ chế hòa vốn mới) -> chạm SL = hòa, không phải thua
+                if rec.get("be_moved") or abs(usd) < 0.01:
+                    rec["status"] = "breakeven"
+                    rec["usd"] = 0.0
+                else:
+                    rec["status"] = "loss"
+                    rec["usd"] = usd
+                break
+            if hit_tp:
                 rec["status"] = "win"
-                rec["usd"] = round((rec["tp1"] - rec["entry"]) * USD_PER_POINT, 2)
-            elif current_price <= rec["sl"]:
-                rec["status"] = "loss"
-                rec["usd"] = round((rec["sl"] - rec["entry"]) * USD_PER_POINT, 2)  # số âm
-        else:  # SELL
-            if current_price <= rec["tp1"]:
-                rec["status"] = "win"
-                rec["usd"] = round((rec["entry"] - rec["tp1"]) * USD_PER_POINT, 2)
-            elif current_price >= rec["sl"]:
-                rec["status"] = "loss"
-                rec["usd"] = round((rec["entry"] - rec["sl"]) * USD_PER_POINT, 2)  # số âm
+                rec["usd"] = round((tp1 - entry) * USD_PER_POINT, 2) if direction == "BUY" \
+                    else round((entry - tp1) * USD_PER_POINT, 2)
+                break
 
-        if rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > timeout:
+        if rec["status"] == "waiting_fill" and trading_hours_elapsed(rec_time, now) > timeout:
+            rec["status"] = "expired"  # giá không bao giờ quay về entry -> lệnh chưa từng vào
+        elif rec["status"] == "pending" and trading_hours_elapsed(rec_time, now) > timeout:
             rec["status"] = "expired"
     return log
 
 
 def manage_active_trades_before_append(log, sig, current_price):
     """
-    Quản lý việc "nhồi lệnh" khi có tín hiệu MỚI cùng chiều + cùng loại (trend/mean_reversion)
-    với 1 hoặc nhiều lệnh CŨ đang chạy (waiting_fill/pending). Áp dụng 3 quy tắc đã thống nhất:
+    Quản lý lệnh đang chạy khi có tín hiệu MỚI cùng chiều + cùng loại. 3 quy tắc ĐÃ SỬA:
 
-    1. HÒA VỐN: lệnh cũ nào chưa chạm SL và giá hiện tại đang ở phía CÓ LỢI so với entry của nó
-       (đã "an toàn") -> đóng lại luôn với kết quả "hòa vốn" (breakeven), không tính thắng/thua,
-       giải phóng chỗ thay vì để nó "trôi" song song vô thời hạn.
-    2. GIỚI HẠN NHỒI: sau khi hòa vốn xong, nếu số lệnh CÙNG chiều/loại còn đang chạy đã đạt
-       MAX_STACK_PER_DIRECTION -> KHÔNG cho nhồi thêm, dù điểm số có mạnh hơn bao nhiêu.
-    3. NHỒI CÓ LÝ DO: nếu còn dưới giới hạn, chỉ cho nhồi thêm khi điểm tín hiệu mới mạnh hơn
-       lệnh đang chạy gần nhất ít nhất MIN_SCORE_IMPROVEMENT_TO_STACK điểm - kèm lý do rõ ràng.
-       Nếu không đủ mạnh hơn, KHÔNG tạo bản ghi mới - chỉ trả về ghi chú để hiển thị tham khảo,
-       tránh vừa nhồi lệnh vô tội vạ vừa làm loãng thống kê thắng/thua.
+    1. HÒA VỐN = DỜI SL VỀ ENTRY (không đóng lệnh!): lệnh cũ đang có lãi >= 50% khoảng SL
+       của nó -> dời SL về đúng entry. Lệnh VẪN CHẠY tiếp tới TP, chỉ là hết rủi ro.
+       (Quy tắc cũ ĐÓNG NGAY lệnh đang lãi thành $0 mỗi khi có tín hiệu mới cùng chiều -
+       mà box "ready" tồn tại qua nhiều lần chạy 5 phút nên tín hiệu cùng chiều xuất hiện
+       liên tục -> mọi lệnh thắng đều bị flush về $0, lệnh thua thì chạy đủ SL. Đây là
+       lỗi kỳ vọng âm nghiêm trọng nhất của bản trước.)
+    2. GIỚI HẠN NHỒI: số lệnh cùng chiều/loại đang chạy đạt MAX_STACK_PER_DIRECTION
+       -> KHÔNG nhồi thêm.
+    3. CHỐNG TRÙNG BOX: mỗi box chỉ giao dịch 1 LẦN. Tín hiệu mới có cùng "vân tay"
+       (fingerprint = khung + biên box + hướng) với bất kỳ bản ghi nào đã có trong log
+       (kể cả đã đóng) -> không tạo bản ghi mới. Trước đây cùng 1 box "ready" có thể
+       sinh lệnh lặp lại sau khi lệnh trước đóng, làm loãng thống kê.
 
     Trả về: (log đã cập nhật, should_append: bool, stack_note: str hoặc None)
     """
@@ -1142,57 +1284,66 @@ def manage_active_trades_before_append(log, sig, current_price):
     if not direction or mode not in ("trend", "mean_reversion", "box"):
         return log, True, None
 
+    # --- Quy tắc 3: chống trùng box (kiểm tra TRƯỚC mọi thứ khác) ---
+    fp = sig.get("fingerprint")
+    if fp and any(r.get("fingerprint") == fp for r in log):
+        return log, False, "Box này đã có lệnh được ghi nhận trước đó - không tạo lệnh trùng, chỉ tham khảo."
+
     active = [r for r in log if r.get("mode") == mode and r.get("direction") == direction
               and r.get("status") in ("waiting_fill", "pending")]
 
-    # --- Bước 1: hòa vốn các lệnh cũ đã "an toàn" (chưa chạm SL, đang có lợi) ---
+    # --- Quy tắc 1: dời SL về entry cho lệnh đã lãi >= 50% khoảng rủi ro (KHÔNG đóng lệnh) ---
+    be_moved_count = 0
     for rec in active:
-        if rec["status"] != "pending":
-            continue  # lệnh limit chưa khớp thì chưa có gì để tính hòa vốn
-        favorable = (direction == "BUY" and current_price > rec["entry"]) or \
-                    (direction == "SELL" and current_price < rec["entry"])
-        if favorable:
-            rec["status"] = "breakeven"
-            rec["usd"] = 0.0
+        if rec["status"] != "pending" or rec.get("be_moved"):
+            continue
+        risk_dist = abs(rec["entry"] - rec["sl"])
+        if risk_dist <= 0:
+            continue
+        profit = (current_price - rec["entry"]) if rec["direction"] == "BUY" \
+            else (rec["entry"] - current_price)
+        if profit >= risk_dist * 0.5:
+            rec["sl"] = rec["entry"]  # chỉ dời theo hướng CÓ LỢI, không bao giờ nới rộng
+            rec["be_moved"] = True
+            be_moved_count += 1
 
-    active = [r for r in active if r["status"] in ("waiting_fill", "pending")]  # cập nhật lại sau hòa vốn
+    be_note = f"🛡️ Đã dời SL về entry cho {be_moved_count} lệnh (lãi >=0.5R, hết rủi ro). " \
+        if be_moved_count else ""
 
-    # --- Bước 2 + 3: quyết định có cho nhồi thêm không ---
+    # --- Quy tắc 2: giới hạn số lệnh chạy song song ---
     if not active:
-        return log, True, None  # không có lệnh nào đang chạy -> tạo bình thường
+        return log, True, (be_note or None)
 
     if len(active) >= MAX_STACK_PER_DIRECTION:
-        note = (f"Đã đạt giới hạn {MAX_STACK_PER_DIRECTION} lệnh {direction} ({mode}) chạy song song "
-                f"-> KHÔNG nhồi thêm, chỉ tham khảo phân tích lần này.")
+        note = (f"{be_note}Đã đạt giới hạn {MAX_STACK_PER_DIRECTION} lệnh {direction} ({mode}) "
+                f"chạy song song -> KHÔNG nhồi thêm, chỉ tham khảo phân tích lần này.")
         return log, False, note
 
+    # Còn chỗ trống nhưng đã có lệnh cùng chiều đang chạy từ box khác -> vẫn cho phép
+    # (fingerprint đã chặn trùng box; box KHÁC cùng chiều là setup độc lập hợp lệ)
     latest_active = active[-1]
-    old_score = abs(latest_active.get("score", 0))
-    new_score = abs(sig.get("score", 0))
-    if new_score - old_score >= MIN_SCORE_IMPROVEMENT_TO_STACK:
-        note = (f"📦 NHỒI LỆNH: điểm mới ({sig['score']}) mạnh hơn lệnh {direction} đang chạy "
-                f"(điểm {latest_active.get('score', 0)}) từ {MIN_SCORE_IMPROVEMENT_TO_STACK}+ điểm.")
-        return log, True, note
-
     entry_old = latest_active["entry"]
     usd_now = round((current_price - entry_old) * USD_PER_POINT, 2) if direction == "BUY" \
         else round((entry_old - current_price) * USD_PER_POINT, 2)
-    note = (f"Đã có {len(active)} lệnh {direction} ({mode}) đang chạy (gần nhất entry {entry_old:.2f}, "
-            f"hiện {'+' if usd_now >= 0 else ''}${usd_now}) - điểm mới ({sig['score']}) chưa đủ mạnh hơn "
-            f"rõ rệt để nhồi thêm, chỉ tham khảo.")
-    return log, False, note
+    note = (f"{be_note}Đang có {len(active)} lệnh {direction} ({mode}) chạy song song "
+            f"(gần nhất entry {entry_old:.2f}, hiện {'+' if usd_now >= 0 else ''}${usd_now}) "
+            f"- lệnh mới từ box khác, được phép chạy thêm.")
+    return log, True, note
 
 
 def append_signal(log, sig):
-    """Thêm tín hiệu vừa tạo (nếu có hướng BUY/SELL) vào log để theo dõi sau này."""
+    """Thêm tín hiệu vừa tạo (nếu có hướng BUY/SELL) vào log để theo dõi sau này.
+    Lưu thêm: signal_price (giá lúc tạo - để phân biệt limit/stop), order_kind (loại lệnh
+    chờ), fingerprint (vân tay box - chống giao dịch trùng 1 box nhiều lần)."""
     if not sig.get("direction"):
         return log
     entry_type = sig.get("entry_type", "market")
-    # Lệnh limit ("chờ giá về") bắt đầu ở trạng thái CHỜ KHỚP, không tính thắng/thua ngay.
+    # Lệnh chờ (limit/stop) bắt đầu ở trạng thái CHỜ KHỚP, không tính thắng/thua ngay.
     # Lệnh market (vào giá hiện tại) coi như khớp ngay lập tức.
     initial_status = "waiting_fill" if entry_type == "limit" else "pending"
-    log.append({
-        "time_iso": datetime.now(timezone.utc).isoformat(),
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rec = {
+        "time_iso": now_iso,
         "direction": sig["direction"],
         "entry": sig["entry"],
         "sl": sig["sl"],
@@ -1203,7 +1354,17 @@ def append_signal(log, sig):
         "entry_type": entry_type,
         "status": initial_status,
         "timeout_hours": sig.get("timeout_hours", SIGNAL_TIMEOUT_HOURS),
-    })
+        "signal_price": sig.get("price"),
+        "order_kind": sig.get("order_kind", "limit"),
+        "fingerprint": sig.get("fingerprint"),
+        # Điểm bối cảnh + breakdown từng phiếu - nguyên liệu cho so sánh win rate
+        # nhóm điểm cao/thấp sau 30-50 lệnh (mục đích tồn tại của hệ điểm này)
+        "ctx_score": sig["ctx"]["score"] if sig.get("ctx") else None,
+        "ctx_votes": sig["ctx"]["votes"] if sig.get("ctx") else None,
+    }
+    if initial_status == "pending":
+        rec["fill_time_iso"] = now_iso
+    log.append(rec)
     return log
 
 
@@ -1708,6 +1869,121 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 
 
 # ============================================================
+# 2e. ĐIỂM BỐI CẢNH (CONTEXT SCORE) - lớp tin cậy, KHÔNG phải cò súng
+# ============================================================
+# Khác hẳn hệ chấm điểm cũ (đã bỏ vì cộng nhiều chỉ báo TRÙNG thông tin - EMA↓ + MA↓ +
+# BOS↓ là 1 thông tin đếm 3 lần): mỗi phiếu ở đây đo 1 khía cạnh ĐỘC LẬP, và điểm này
+# KHÔNG tự sinh lệnh, không chặn lệnh, không đổi SL/TP - chỉ trả lời câu hỏi "bối cảnh
+# đang thuận hay nghịch với lệnh box?" + được LƯU VÀO LOG để sau 30-50 lệnh so sánh
+# win rate nhóm điểm cao vs thấp bằng dữ liệu thật, rồi mới quyết có trao quyền lọc lệnh.
+#
+# 5 phiếu (mỗi phiếu +1/0/-1 so với HƯỚNG LỆNH box), thang tổng -5 -> +4:
+# 1. Dow (H1)          - cấu trúc đỉnh/đáy
+# 2. Ichimoku (H1)     - vị thế giá so với mây (chỉ tính mức "mạnh nhất")
+# 3. EMA đa khung      - CHỈ H4/H1/M30 (cố ý loại M15/M5: entry box là lệnh chờ pullback,
+#                        khung nhỏ gần như luôn ngược hướng lệnh ngay trước lúc khớp)
+# 4. MACD hist (M15)   - động lượng (M15 thay vì M5 để phiếu không nhấp nháy giữa các lần chạy)
+# 5. RSI (M5)          - CHỈ PHẠT: BUY khi quá mua / SELL khi quá bán -> -1, không có phiếu +
+# (Phiên giao dịch KHÔNG tham gia chấm điểm - chỉ giữ dòng cảnh báo riêng như cũ.)
+
+CTX_HIGH_GROUP_MIN = 2   # ngưỡng chia nhóm "điểm cao" khi so sánh thống kê (>= +2)
+CTX_LOW_CONFIDENCE = -3  # điểm <= mức này -> gắn confidence "low" (thay 2 quy tắc Dow/Ichimoku cũ)
+
+
+def compute_context_score(direction, dow_trend, ichimoku, trend_arrows, macd_hist_m15, rsi_m5):
+    """
+    Trả về {"score": int, "votes": {tên: +1/0/-1}, "label": str, "icon_line": str}.
+    direction: "BUY"/"SELL" (hướng lệnh box). Mỗi phiếu so với hướng này.
+    """
+    want = "up" if direction == "BUY" else "down"
+    against = "down" if direction == "BUY" else "up"
+    votes = {}
+
+    # 1. Dow (H1)
+    if dow_trend == want:
+        votes["Dow"] = 1
+    elif dow_trend == against:
+        votes["Dow"] = -1
+    else:
+        votes["Dow"] = 0
+
+    # 2. Ichimoku (H1) - chỉ mức "mạnh nhất" mới được bỏ phiếu, mới hình thành/trong mây = 0
+    votes["Ichimoku"] = 0
+    if ichimoku:
+        strong_same = (ichimoku["strength"] == "strong_bull" and direction == "BUY") or \
+                      (ichimoku["strength"] == "strong_bear" and direction == "SELL")
+        strong_opposite = (ichimoku["strength"] == "strong_bull" and direction == "SELL") or \
+                          (ichimoku["strength"] == "strong_bear" and direction == "BUY")
+        if strong_same:
+            votes["Ichimoku"] = 1
+        elif strong_opposite:
+            votes["Ichimoku"] = -1
+
+    # 3. EMA đa khung - chỉ H4/H1/M30
+    big_tfs = [trend_arrows.get(tf) for tf in ("H4", "H1", "M30")]
+    big_tfs = [t for t in big_tfs if t is not None]
+    votes["EMA"] = 0
+    if len(big_tfs) >= 2:
+        same = sum(1 for t in big_tfs if t == want)
+        opposite = sum(1 for t in big_tfs if t == against)
+        if same >= 2:
+            votes["EMA"] = 1
+        elif opposite >= 2:
+            votes["EMA"] = -1
+
+    # 4. MACD histogram (M15) - sát 0 (|hist| < 0.05) coi là trung tính
+    votes["MACD"] = 0
+    if macd_hist_m15 is not None and abs(macd_hist_m15) >= 0.05:
+        hist_dir = "up" if macd_hist_m15 > 0 else "down"
+        votes["MACD"] = 1 if hist_dir == want else -1
+
+    # 5. RSI (M5) - chỉ phạt đu vào vùng cực đoan ngược
+    votes["RSI"] = 0
+    if rsi_m5 is not None:
+        if (direction == "BUY" and rsi_m5 >= 70) or (direction == "SELL" and rsi_m5 <= 30):
+            votes["RSI"] = -1
+
+    score = sum(votes.values())
+    if score >= 3:
+        label = "THUẬN MẠNH 💪"
+    elif score >= 1:
+        label = "thuận nhẹ"
+    elif score == 0:
+        label = "trung tính"
+    elif score >= -2:
+        label = "nghịch nhẹ ⚠️"
+    else:
+        label = "NGHỊCH MẠNH 🚨"
+
+    sym = {1: "✓", -1: "✗", 0: "–"}
+    icon_line = "  ".join(f"{name}{sym[v]}" for name, v in votes.items())
+    return {"score": score, "votes": votes, "label": label, "icon_line": icon_line}
+
+
+def compare_ctx_win_rate(log, high_min=CTX_HIGH_GROUP_MIN):
+    """
+    So sánh win rate nhóm điểm bối cảnh CAO (>= high_min) vs THẤP (<= 0) trên các lệnh đã
+    đóng thắng/thua - đây là mục đích tồn tại của cả hệ điểm: sau 30-50 lệnh, dòng này cho
+    biết bối cảnh có thực sự dự báo được kết quả không, quyết định có nâng thành bộ lọc.
+    Trả về chuỗi hiển thị, hoặc None nếu chưa có bản ghi nào mang điểm bối cảnh.
+    """
+    closed = [r for r in log if r.get("status") in ("win", "loss") and r.get("ctx_score") is not None]
+    if not closed:
+        return None
+
+    def _grp(records):
+        if not records:
+            return "0 lệnh"
+        w = sum(1 for r in records if r["status"] == "win")
+        return f"{w}W/{len(records) - w}L ({round(w / len(records) * 100)}%)"
+
+    high = [r for r in closed if r["ctx_score"] >= high_min]
+    low = [r for r in closed if r["ctx_score"] <= 0]
+    return f"Điểm ≥+{high_min}: {_grp(high)} | Điểm ≤0: {_grp(low)}"
+
+
+
+# ============================================================
 # 3. LOGIC TẠO TÍN HIỆU
 # ============================================================
 def generate_signal(active_zone_directions=None):
@@ -1768,6 +2044,11 @@ def generate_signal(active_zone_directions=None):
     macd_bias = "up" if hist_now > 0 else ("down" if hist_now < 0 else None)
     divergence = detect_divergence(df_m5, hist)
 
+    # MACD histogram M15 - dùng RIÊNG cho phiếu điểm bối cảnh (M5 đổi dấu quá thường
+    # xuyên làm phiếu nhấp nháy giữa các lần chạy 5 phút; M15 ổn định hơn)
+    _, _, hist_m15 = macd(df_m15["close"])
+    macd_hist_m15 = float(hist_m15.iloc[-1]) if len(hist_m15) else None
+
     session_ok = is_active_session()
     news_warning = check_upcoming_news()
 
@@ -1783,7 +2064,10 @@ def generate_signal(active_zone_directions=None):
                                   bound_range=(box_h1["box_low"], box_h1["box_high"]))
     else:
         box_m15 = find_box_state(df_m15, atr_m15_series)  # không có box H1 thì M15 tìm tự do
-    box_signal = build_box_signal(box_m15, box_h1, atr_m5)
+    atr_by_tf = {"H1": float(atr_h1_series.iloc[-1]) if len(atr_h1_series) else atr_m5,
+                 "M15": float(atr_m15_series.iloc[-1]) if len(atr_m15_series) else atr_m5}
+    box_signal = build_box_signal(box_m15, box_h1, atr_m5,
+                                   current_price=current_price, atr_by_tf=atr_by_tf)
 
     # Xu hướng CHÍNH theo Lý thuyết Dow (chuỗi đỉnh/đáy H1) - dùng để đối chiếu với hướng lệnh
     # box, không phải điều kiện chặn cứng mà chỉ là 1 lớp cảnh báo thêm khi 2 bên mâu thuẫn.
@@ -1815,6 +2099,14 @@ def generate_signal(active_zone_directions=None):
     confidence = "normal"
     confidence_notes = []
 
+    # Điểm bối cảnh: tính cho MỌI box đã có hướng (kể cả waiting_retest - để bạn thấy trước
+    # bối cảnh trong lúc chờ retest), không chỉ lúc ready.
+    ctx = None
+    if box_signal and box_signal.get("direction"):
+        ctx = compute_context_score(box_signal["direction"], dow_trend, ichimoku_h1,
+                                     trend_arrows, macd_hist_m15, rsi_m5)
+        box_signal["ctx"] = ctx
+
     if market_flat:
         block_reason = "Thị trường đang đứng yên (nghỉ lễ/ngoài giờ giao dịch thực) - dữ liệu gần như không đổi, tạm dừng phân tích"
     elif not box_signal:
@@ -1825,18 +2117,12 @@ def generate_signal(active_zone_directions=None):
         if box_signal["alignment"] == "ngược":
             confidence = "low"
             confidence_notes.append("Lệnh NGƯỢC xu hướng của nến thanh khoản (chỉ 2 điểm entry, thận trọng hơn)")
-        dow_conflict = (dow_trend == "up" and direction == "SELL") or (dow_trend == "down" and direction == "BUY")
-        if dow_conflict:
+        # Bối cảnh NGHỊCH MẠNH (điểm <= -3) -> hạ độ tin cậy. Thay thế 2 quy tắc ad-hoc cũ
+        # (xung đột Dow, xung đột Ichimoku) bằng 1 cơ chế thống nhất - mỗi xung đột đơn lẻ
+        # giờ chỉ là 1 phiếu trừ, phải nhiều phiếu cùng chống mới đủ hạ tin cậy.
+        if ctx and ctx["score"] <= CTX_LOW_CONFIDENCE:
             confidence = "low"
-            dow_txt = "TĂNG" if dow_trend == "up" else "GIẢM"
-            confidence_notes.append(f"Ngược xu hướng chính theo Dow (H1 đang {dow_txt} theo chuỗi đỉnh/đáy) - rủi ro cao hơn")
-        if ichimoku_h1:
-            ichimoku_conflict = (ichimoku_h1["strength"] == "strong_bull" and direction == "SELL") or \
-                                 (ichimoku_h1["strength"] == "strong_bear" and direction == "BUY")
-            if ichimoku_conflict:
-                confidence = "low"
-                pos_txt = "TRÊN mây XANH" if ichimoku_h1["strength"] == "strong_bull" else "DƯỚI mây ĐỎ"
-                confidence_notes.append(f"Ngược Ichimoku H1 (giá đang {pos_txt} - xác nhận mạnh) - rủi ro cao hơn")
+            confidence_notes.append(f"Bối cảnh NGHỊCH MẠNH ({ctx['score']:+d}: {ctx['icon_line']}) - rủi ro cao hơn hẳn")
     else:
         state_txt = "chưa xác nhận breakout" if box_signal["state"] == "unconfirmed" else "đã xác nhận, đang chờ giá quay về test biên"
         block_reason = f"Có box {box_signal['tf']} ({state_txt}) - xem chi tiết box bên dưới"
@@ -1929,11 +2215,14 @@ def generate_signal(active_zone_directions=None):
         "timeout_hours": SIGNAL_TIMEOUT_HOURS,
         "bos_retest_note": None,
         "box_signal": box_signal,
+        "ctx": ctx,
         "box_chart_df": (df_h1 if box_signal["tf"] == "H1" else df_m15) if box_signal else None,
         "trend_arrows": trend_arrows,
     }
 
-    if box_signal and box_signal["state"] == "ready":
+    result["df_m5"] = df_m5  # dùng cho theo dõi kết quả path-aware ở vòng chạy chính
+
+    if box_signal and box_signal["state"] == "ready" and box_signal.get("entries"):
         # Entry ĐẦU TIÊN trong danh sách làm đại diện theo dõi thắng/thua (các entry còn lại
         # hiển thị đầy đủ trong tin nhắn để bạn tự chọn/vào thang, nhưng chỉ 1 được log lại).
         primary = box_signal["entries"][0]
@@ -1941,8 +2230,21 @@ def generate_signal(active_zone_directions=None):
             "entry": primary["entry"], "sl": primary["sl"],
             "tp1": primary["tp1"], "tp2": primary["tp2"], "tp3": primary["tp3"],
             "entry_type": "limit",
+            "order_kind": primary.get("order_kind", "limit"),
+            # Vân tay box: khung + biên (làm tròn 1 số lẻ) + hướng - đủ ổn định giữa các lần
+            # chạy (biên box không đổi) để chống giao dịch trùng cùng 1 box nhiều lần.
+            "fingerprint": f"{box_signal['tf']}:{box_signal['box_low']:.1f}-"
+                           f"{box_signal['box_high']:.1f}:{box_signal['direction']}",
         })
         result["fib_note"] = fib_confluence_note(fib, primary["entry"], primary["sl"], primary["tp1"], atr_m5)
+
+        # Cảnh báo "không mua đuổi": giá hiện tại cách entry quá xa (>= 2.5x ATR M5)
+        # -> nhấn mạnh đây là lệnh CHỜ, tuyệt đối không vào market đuổi theo.
+        if atr_m5 > 0:
+            dist_atr = abs(current_price - primary["entry"]) / atr_m5
+            if dist_atr >= CHASE_WARNING_ATR:
+                result["chase_warning"] = (f"Giá đang cách entry {dist_atr:.1f}x ATR - "
+                                            f"CHỜ GIÁ VỀ {primary['entry']:.2f}, không đuổi lệnh!")
 
     return result
 
@@ -2001,6 +2303,13 @@ def format_message(sig, win_stats=None, active_trades=None):
         if dow_trend:
             lines.append(f"📐 Xu hướng chính (Dow, H1): {'TĂNG (HH+HL)' if dow_trend == 'up' else 'GIẢM (LH+LL)'}")
 
+        # Điểm bối cảnh: 5 phiếu độc lập so với hướng lệnh box - thang -5..+4.
+        # Chỉ hiển thị tham khảo, KHÔNG chặn lệnh (đang giai đoạn thu thập dữ liệu).
+        ctx = box.get("ctx")
+        if ctx:
+            lines.append(f"💪 Bối cảnh: {ctx['score']:+d} {ctx['label']}")
+            lines.append(f"   {ctx['icon_line']}")
+
         ichimoku = box.get("ichimoku")
         if ichimoku:
             ichimoku_txt = {
@@ -2020,19 +2329,28 @@ def format_message(sig, win_stats=None, active_trades=None):
                 lines.append("⚠️ Box mới hình thành, CHƯA có nến xác nhận breakout - chỉ có entry RỦI RO:")
                 for e in box["entries"]:
                     e_icon = "🟢" if e["direction"] == "BUY" else "🔴"
-                    lines.append(f"   {e_icon} {e['direction']} tại {e['label']} ({e['entry']:.2f})  "
-                                  f"SL {e['sl']:.2f}  TP {e['tp1']:.2f}/{e['tp2']:.2f}/{e['tp3']:.2f}")
+                    sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
+                    lines.append(f"   {e_icon} {e['direction']} tại {e['label']}")
+                    lines.append(f"      📍 E: {e['entry']:.2f}")
+                    lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p)")
+                    lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
         else:
             align_txt = "THUẬN xu hướng" if box["alignment"] == "thuận" else "NGƯỢC xu hướng (thận trọng hơn)"
             lines.append(f"Xác nhận phá {'đỉnh' if box['confirm_dir']=='up' else 'đáy'} -> "
                           f"{box['direction']} {align_txt}")
             for e in box["entries"]:
-                lines.append(f"   📍 {e['label']} ({e['entry']:.2f})  SL {e['sl']:.2f}  "
-                              f"TP {e['tp1']:.2f}/{e['tp2']:.2f}/{e['tp3']:.2f}")
+                kind_txt = "⏳ CHỜ GIÁ VỀ" if e.get("order_kind", "limit") == "limit" else "⏳ CHỜ GIÁ VƯỢT QUA"
+                sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
+                lines.append(f"   📍 E({e['label']}): {e['entry']:.2f}  {kind_txt}")
+                lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p)")
+                lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
             if box["state"] == "waiting_retest":
                 lines.append("⏳ Đã xác nhận nhưng giá CHƯA quay về test biên - chưa nên vào lệnh")
             else:
-                lines.append("✅ Giá ĐÃ quay về test - đủ điều kiện xem xét entry")
+                lines.append("✅ Giá ĐÃ quay về test - đặt lệnh CHỜ tại entry, KHÔNG vào market đuổi giá")
+
+        if sig.get("chase_warning"):
+            lines.append(f"⚖️ {sig['chase_warning']}")
 
         if sig.get("confidence") == "low":
             for note in sig.get("confidence_notes", []):
@@ -2086,6 +2404,11 @@ def format_message(sig, win_stats=None, active_trades=None):
 
         lines.append(section_header("📊", "THỐNG KÊ"))
         lines.append(f"📦 Box đã xác nhận: {_stat_txt(win_stats.get('box'))}")
+        # So sánh nhóm điểm bối cảnh cao vs thấp - đủ ~30-50 lệnh đóng thì dòng này
+        # quyết định số phận hệ điểm: dự báo được thắng/thua -> nâng thành bộ lọc,
+        # không khác biệt -> giữ làm hiển thị tham khảo.
+        if win_stats.get("ctx_compare"):
+            lines.append(f"💪 {win_stats['ctx_compare']}")
         lines.append("")
 
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
@@ -2194,7 +2517,8 @@ if __name__ == "__main__":
         exit(0)
 
     # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
-    log = update_signal_outcomes(log, signal["price"])
+    # (path-aware: duyệt high/low từng nến M5 kể từ lúc tạo/khớp lệnh, không chỉ giá hiện tại)
+    log = update_signal_outcomes(log, signal["df_m5"], signal["price"])
 
     # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
     log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
@@ -2208,6 +2532,7 @@ if __name__ == "__main__":
     save_signal_log(log)
     win_stats = {
         "box": compute_win_rate(log, mode="box"),
+        "ctx_compare": compare_ctx_win_rate(log),
     }
 
     message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
