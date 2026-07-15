@@ -65,6 +65,12 @@ def get_ohlc(interval, outputsize=100):
         "outputsize": outputsize,
         "apikey": TWELVEDATA_API_KEY,
         "order": "ASC",
+        # BẮT BUỘC: không có tham số này, Twelve Data trả timestamp theo múi giờ "Exchange"
+        # (lệch UTC nhiều tiếng) -> tracking path-aware so timestamp nến với time_iso (UTC)
+        # của lệnh bị lệch múi -> nến QUÁ KHỨ bị coi là "sau khi tạo lệnh" -> lệnh khớp ảo
+        # và "thắng" bằng chuyển động giá đã xảy ra TRƯỚC khi lệnh tồn tại (lỗi thực tế
+        # đã gặp: fade SELL 4051.33 thắng +$47.63 dù giá chưa hề chạm entry sau khi tạo).
+        "timezone": "UTC",
     }
     r = requests.get(url, params=params, timeout=15)
     data = r.json()
@@ -1435,13 +1441,25 @@ def flip_confluence_note(entry_dict, levels, atr_m5):
 
 def _candles_since(df_m5, start_time_utc):
     """
-    Lấy các nến M5 có thời điểm >= start_time_utc. Datetime của Twelve Data trả về dạng
-    naive (mặc định UTC với forex/kim loại) - localize sang UTC để so sánh được với
-    time_iso (UTC aware) trong log.
+    Lấy các nến M5 có thời điểm >= start_time_utc (UTC aware).
+
+    LƯỚI AN TOÀN MÚI GIỜ: dù API đã được ép timezone=UTC, vẫn tự kiểm tra - nếu nến
+    MỚI NHẤT lệch quá 30 phút so với giờ UTC hiện tại (bot chỉ chạy khi thị trường mở,
+    nến M5 cuối phải rất gần hiện tại), nghĩa là dữ liệu đang mang múi giờ khác ->
+    TỰ NEO LẠI: dịch toàn bộ timestamp theo offset (giờ thật - nến cuối). Không có lưới
+    này, dữ liệu lệch múi làm nến QUÁ KHỨ lọt qua bộ lọc "sau khi tạo lệnh" -> lệnh
+    khớp ảo bằng chuyển động giá đã xảy ra trước khi lệnh tồn tại.
     """
     dt = df_m5["datetime"]
     if dt.dt.tz is None:
         dt = dt.dt.tz_localize("UTC")
+    now = datetime.now(timezone.utc)
+    last = dt.iloc[-1]
+    skew = now - last
+    # Nến cuối lệch quá 30 phút (cả 2 chiều) -> dữ liệu sai múi giờ, neo lại theo giờ thật.
+    # Chừa 30 phút đủ rộng cho trễ API/nến đang hình thành, đủ hẹp để bắt lệch múi (>=1h).
+    if abs(skew.total_seconds()) > 1800:
+        dt = dt + skew
     mask = dt >= start_time_utc
     out = df_m5.loc[mask].copy()
     out["datetime_utc"] = dt[mask]
