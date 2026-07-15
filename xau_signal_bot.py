@@ -1520,8 +1520,10 @@ def update_signal_outcomes(log, df_m5, current_price):
         candles = _candles_since(df_m5, start_time)
 
         filled = (status == "pending")
+        fill_this_candle = False
         for _, c in candles.iterrows():
             lo, hi = c["low"], c["high"]
+            fill_this_candle = False
 
             if not filled:
                 if direction == "BUY":
@@ -1533,17 +1535,35 @@ def update_signal_outcomes(log, df_m5, current_price):
                 if not hit:
                     continue
                 filled = True
+                fill_this_candle = True
                 rec["status"] = "pending"
                 rec["fill_time_iso"] = c["datetime_utc"].isoformat()
-                # nến khớp lệnh CŨNG có thể quét luôn SL/TP -> tiếp tục kiểm tra ngay bên dưới
 
-            # Đã khớp -> kiểm tra SL/TP trên nến này (cùng nến chạm cả 2 -> tính SL, thận trọng)
-            if direction == "BUY":
-                hit_sl, hit_tp = lo <= sl, hi >= tp1
+            # QUAN TRỌNG - NẾN KHỚP LỆNH chỉ được tính phần giá SAU ĐIỂM KHỚP:
+            # phần "biết chắc xảy ra sau khớp" là đoạn vượt qua entry THEO CHIỀU DI CHUYỂN
+            # của giá lúc khớp. Ví dụ Sell Limit khớp bởi nến ĐI LÊN 4040->4052: low 4040
+            # xảy ra TRƯỚC khi giá chạm entry 4051 -> không được lấy low đó so với TP
+            # (lỗi thực tế: bot ghi "thắng" bằng chuyển động tồn tại trước cả vị thế).
+            # - Nến đi LÊN khớp lệnh (Sell Limit / Buy Stop): đoạn hậu khớp = [entry, high]
+            # - Nến đi XUỐNG khớp lệnh (Buy Limit / Sell Stop): đoạn hậu khớp = [low, entry]
+            if fill_this_candle:
+                travel_up = (direction == "SELL" and order_kind == "limit") or \
+                            (direction == "BUY" and order_kind == "stop")
+                eff_lo = entry if travel_up else lo
+                eff_hi = hi if travel_up else entry
             else:
-                hit_sl, hit_tp = hi >= sl, lo <= tp1
+                eff_lo, eff_hi = lo, hi
+
+            # Đã khớp -> kiểm tra SL/TP (cùng nến chạm cả 2 -> tính SL, thận trọng)
+            if direction == "BUY":
+                hit_sl, hit_tp = eff_lo <= sl, eff_hi >= tp1
+            else:
+                hit_sl, hit_tp = eff_hi >= sl, eff_lo <= tp1
 
             if hit_sl:
+                # Vết kiểm toán: nến nào chốt kết quả - đối chiếu chart xác minh thắng/thua thật
+                rec["outcome_candle_iso"] = c["datetime_utc"].isoformat()
+                rec["outcome_time_iso"] = now.isoformat()
                 usd = round((sl - entry) * USD_PER_POINT, 2) if direction == "BUY" \
                     else round((entry - sl) * USD_PER_POINT, 2)
                 # SL đã được dời về entry (cơ chế hòa vốn mới) -> chạm SL = hòa, không phải thua
@@ -1555,6 +1575,8 @@ def update_signal_outcomes(log, df_m5, current_price):
                     rec["usd"] = usd
                 break
             if hit_tp:
+                rec["outcome_candle_iso"] = c["datetime_utc"].isoformat()
+                rec["outcome_time_iso"] = now.isoformat()
                 rec["status"] = "win"
                 rec["usd"] = round((tp1 - entry) * USD_PER_POINT, 2) if direction == "BUY" \
                     else round((entry - tp1) * USD_PER_POINT, 2)
@@ -2275,6 +2297,110 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 
 
 # ============================================================
+# 2c2. GHIM BOX ĐÃ XÁC NHẬN (BOX PINNING) - chống "box mới cướp sóng"
+# ============================================================
+# Lỗi thực tế: bot chỉ nhớ box "gần giá nhất" MỖI LẦN CHẠY. Khi box vừa xác nhận
+# breakout, chính cú breakout đẩy giá vào vùng một nến lớn khác -> lần chạy sau bot
+# chọn box MỚI, box cũ (đang chờ retest - đúng lúc giá trị nhất) bị quên sạch ->
+# không bao giờ có tín hiệu khi giá quay về test cạnh vừa phá.
+# Giải pháp: box đạt trạng thái xác nhận (waiting_retest/ready/spring_*) được GHIM
+# vào file box_state.json (sống qua các lần chạy như signal_log). Các lần chạy sau,
+# box ghim được ưu tiên đánh giá lại (retest? vô hiệu?) và THAY THẾ box mới phát hiện
+# trên cùng khung - cho đến khi nó: đã ra lệnh (fingerprint có trong log) / bị vô hiệu
+# / hết hạn theo dõi. Chỉ khi đó box mới mới được lên sóng.
+BOX_STATE_PATH = "box_state.json"
+BOX_TRACK_MAX_HOURS = 24   # theo dõi retest tối đa 24h sau xác nhận (mức đổi vai dài hạn
+                           # hơn đã có sổ flipped_levels lo, ghim chỉ phục vụ setup retest tươi)
+
+
+def load_pinned_box():
+    if not os.path.exists(BOX_STATE_PATH):
+        return None
+    try:
+        with open(BOX_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_pinned_box(pin):
+    with open(BOX_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(pin, f, ensure_ascii=False, indent=2)
+
+
+def clear_pinned_box():
+    try:
+        if os.path.exists(BOX_STATE_PATH):
+            os.remove(BOX_STATE_PATH)
+    except Exception:
+        pass
+
+
+def evaluate_pinned_box(pin, df_m5, live_price):
+    """
+    Đánh giá lại box đã ghim bằng dữ liệu hiện tại. Trả về dict box (đúng cấu trúc
+    find_box_state trả ra) với state cập nhật, hoặc None nếu box đã chết:
+    - HẾT HẠN: quá BOX_TRACK_MAX_HOURS kể từ lúc xác nhận
+    - VÔ HIỆU: giá đi XUYÊN NGƯỢC hết box (phá lên mà giá về dưới cạnh dưới / phá xuống
+      mà giá vượt cạnh trên); spring: giá thủng đáy/đỉnh cú quét
+    - RETEST: kiểm tra bằng đường đi high/low nến M5 KỂ TỪ LÚC XÁC NHẬN (không phụ
+      thuộc thời điểm chạy) -> ready/spring_ready khi đã chạm vùng entry
+    """
+    try:
+        confirmed_at = datetime.fromisoformat(pin["confirmed_at_iso"])
+    except Exception:
+        return None
+    now = datetime.now(timezone.utc)
+    if (now - confirmed_at).total_seconds() > BOX_TRACK_MAX_HOURS * 3600:
+        return None
+
+    is_spring = str(pin.get("state", "")).startswith("spring")
+    # --- Vô hiệu hóa ---
+    if is_spring:
+        sweep = pin.get("sweep_extreme")
+        if sweep is not None:
+            if pin["direction"] == "BUY" and live_price < sweep:
+                return None
+            if pin["direction"] == "SELL" and live_price > sweep:
+                return None
+    else:
+        if pin["confirm_dir"] == "up" and live_price < pin["box_low"]:
+            return None
+        if pin["confirm_dir"] == "down" and live_price > pin["box_high"]:
+            return None
+
+    # --- Retest theo đường đi nến M5 kể từ lúc xác nhận ---
+    tol = pin.get("retest_tol", 1.0)
+    candles = _candles_since(df_m5, confirmed_at)
+    retested = False
+    for e in pin.get("entries", []):
+        level = e["price"]
+        if len(candles) > 0:
+            touched = ((candles["low"] - tol <= level) & (level <= candles["high"] + tol)).any()
+        else:
+            touched = False
+        if touched or abs(live_price - level) <= tol:
+            retested = True
+            break
+
+    box = {k: pin[k] for k in ("box_high", "box_low", "box_mid", "color",
+                                 "direction", "alignment", "confirm_dir", "entries")}
+    if is_spring:
+        box["sweep_extreme"] = pin.get("sweep_extreme")
+        box["state"] = "spring_ready" if retested else "spring_waiting"
+    else:
+        box["state"] = "ready" if retested else "waiting_retest"
+    box["pinned"] = True  # đánh dấu để hiển thị/debug biết box này đến từ ghim
+    return box
+
+
+def make_box_fingerprint(tf, box_low, box_high, direction, is_spring):
+    """Cùng công thức fingerprint dùng cho log lệnh - đảm bảo pin và lệnh khớp nhau."""
+    suffix = ":SPRING" if is_spring else ""
+    return f"{tf}:{box_low:.1f}-{box_high:.1f}:{direction}{suffix}"
+
+
+# ============================================================
 # 2d. VỊ TRÍ ENTRY (LOCATION GRADE) - Premium/Discount + FVG (ICT/SMC)
 # ============================================================
 # Khác với ĐIỂM BỐI CẢNH 💪 (đo HƯỚNG lệnh có thuận dòng chảy không), khối 🎯 này đo
@@ -2615,6 +2741,23 @@ def generate_signal(active_zone_directions=None):
     else:
         # không có box H1 thì M15 tìm tự do
         box_m15 = find_box_state(df_m15, atr_m15_series, live_price=current_price)
+
+    # ---- BOX GHIM: box đã xác nhận từ lần chạy trước được ƯU TIÊN, chống box mới cướp sóng ----
+    pinned = load_pinned_box()
+    if pinned:
+        # Đã ra lệnh cho box này rồi (fingerprint có trong log) -> nhiệm vụ hoàn thành, gỡ ghim
+        log_ro = load_signal_log()
+        if pinned.get("fingerprint") and any(r.get("fingerprint") == pinned["fingerprint"] for r in log_ro):
+            clear_pinned_box()
+            pinned = None
+    if pinned:
+        pinned_box = evaluate_pinned_box(pinned, df_m5, current_price)
+        if pinned_box is None:
+            clear_pinned_box()  # hết hạn/vô hiệu -> box mới được lên sóng từ lần này
+        elif pinned.get("tf") == "H1":
+            box_h1 = pinned_box
+        else:
+            box_m15 = pinned_box
     atr_by_tf = {"H1": float(atr_h1_series.iloc[-1]) if len(atr_h1_series) else atr_m5,
                  "M15": float(atr_m15_series.iloc[-1]) if len(atr_m15_series) else atr_m5}
     box_signal = build_box_signal(box_m15, box_h1, atr_m5,
@@ -2623,6 +2766,29 @@ def generate_signal(active_zone_directions=None):
     # ---- SỔ MỨC ĐỔI VAI (tiếp): đăng ký cạnh vừa vỡ -> lưu -> áp tường TP + cộng hưởng ----
     flip_levels = register_flipped_level(flip_levels, box_signal)
     save_flipped_levels(flip_levels)
+
+    # ---- LƯU GHIM: box đạt trạng thái xác nhận -> ghim lại để các lần chạy sau theo dõi
+    # retest, kể cả khi box mới xuất hiện. Bảo toàn confirmed_at gốc nếu là cùng box. ----
+    if box_signal and box_signal.get("confirm_dir") and \
+            box_signal["state"] in ("waiting_retest", "ready", "spring_waiting", "spring_ready"):
+        raw_src = box_h1 if box_signal["tf"] == "H1" else box_m15
+        if raw_src:
+            fp = make_box_fingerprint(box_signal["tf"], box_signal["box_low"],
+                                       box_signal["box_high"], box_signal["direction"],
+                                       box_signal["alignment"] == "spring")
+            old_pin = load_pinned_box()
+            confirmed_at = old_pin["confirmed_at_iso"] if old_pin and old_pin.get("fingerprint") == fp \
+                else datetime.now(timezone.utc).isoformat()
+            atr_tf_pin = atr_by_tf.get(box_signal["tf"], atr_m5)
+            pin = {k: raw_src[k] for k in ("box_high", "box_low", "box_mid", "color",
+                                             "direction", "alignment", "confirm_dir", "entries")}
+            pin.update({"tf": box_signal["tf"], "state": raw_src["state"],
+                        "fingerprint": fp, "confirmed_at_iso": confirmed_at,
+                        "retest_tol": round(BOX_RETEST_TOLERANCE_ATR * atr_tf_pin, 3)})
+            if raw_src.get("sweep_extreme") is not None:
+                pin["sweep_extreme"] = raw_src["sweep_extreme"]
+            save_pinned_box(pin)
+
     if box_signal and box_signal.get("entries"):
         for e in box_signal["entries"]:
             e["wall_notes"] = apply_flip_walls(e, flip_levels, atr_m5)
@@ -2822,7 +2988,6 @@ def generate_signal(active_zone_directions=None):
             cancel_level = box_signal["box_mid"]
             cancel_side = "above" if primary["direction"] == "SELL" else "below"
 
-        fp_suffix = ":SPRING" if box_signal["alignment"] == "spring" else ""
         result.update({
             "entry": primary["entry"], "sl": primary["sl"],
             "tp1": primary["tp1"], "tp2": primary["tp2"], "tp3": primary["tp3"],
@@ -2830,10 +2995,11 @@ def generate_signal(active_zone_directions=None):
             "order_kind": primary.get("order_kind", "limit"),
             "cancel_level": round(cancel_level, 2) if cancel_level is not None else None,
             "cancel_side": cancel_side,
-            # Vân tay box: khung + biên (làm tròn 1 số lẻ) + hướng (+SPRING nếu là phá vỡ giả -
-            # cùng 1 box có thể có cả lệnh breakout lẫn lệnh spring hợp lệ, không được chặn nhau)
-            "fingerprint": f"{box_signal['tf']}:{box_signal['box_low']:.1f}-"
-                           f"{box_signal['box_high']:.1f}:{box_signal['direction']}{fp_suffix}",
+            # Vân tay box: cùng công thức với box ghim (make_box_fingerprint) - lệnh ra xong
+            # thì fingerprint khớp pin -> pin tự gỡ ở lần chạy sau
+            "fingerprint": make_box_fingerprint(box_signal["tf"], box_signal["box_low"],
+                                                 box_signal["box_high"], box_signal["direction"],
+                                                 box_signal["alignment"] == "spring"),
         })
         result["fib_note"] = fib_confluence_note(fib, primary["entry"], primary["sl"], primary["tp1"], atr_m5)
 
