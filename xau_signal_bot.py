@@ -303,7 +303,8 @@ def merge_boxes_if_overlap(boxes):
 
 
 def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_ATR_MULT,
-                    retest_tolerance_atr=BOX_RETEST_TOLERANCE_ATR, bound_range=None):
+                    retest_tolerance_atr=BOX_RETEST_TOLERANCE_ATR, bound_range=None,
+                    live_price=None):
     """
     Trả về trạng thái box gần nhất:
     - None: không tìm thấy nến thanh khoản nào phù hợp trong phạm vi quét
@@ -313,6 +314,9 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
     - state="ready": đã xác nhận VÀ giá đã quay lại test - sẵn sàng entry (SL 20 giá)
     Truyền bound_range=(low, high) để CHỈ tìm box nằm LỌT trong 1 box khung lớn hơn đã chọn
     trước - dùng cho cấu trúc "box M15 nằm trong box H1".
+    live_price: giá M5 MỚI NHẤT - dùng cho kiểm tra vô hiệu hóa/spring/retest. Nến khung
+    lớn (H1) đã đóng gần nhất có thể cũ tới 1 giờ; đã có trường hợp giá thật vượt hẳn cạnh
+    trên box SELL mà box vẫn hiện "sẵn sàng entry" vì bước vô hiệu hóa nhìn giá đóng H1 cũ.
     """
     boxes = find_recent_liquidity_boxes(df, atr_series, lookback=lookback, range_mult=range_mult,
                                          bound_range=bound_range)
@@ -322,7 +326,7 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
     merged = merge_boxes_if_overlap(boxes)
     box_high, box_low, color = merged["mid_high"], merged["mid_low"], merged["color"]
     box_mid = (box_high + box_low) / 2
-    current_price = df.iloc[-1]["close"]
+    current_price = live_price if live_price is not None else df.iloc[-1]["close"]
     atr_now = atr_series.iloc[-1]
 
     # Giá đang nằm trong "vùng giữa" box (chưa xác nhận) hay không - nếu có, KHÔNG khuyến khích
@@ -1244,6 +1248,191 @@ def save_signal_log(log):
         json.dump(log, f, ensure_ascii=False, indent=2)
 
 
+# ============================================================
+# 2c. SỔ ĐĂNG KÝ MỨC ĐỔI VAI (POLARITY FLIP REGISTRY)
+# ============================================================
+# Nguyên lý đổi vai: cạnh box bị phá vỡ KHÔNG mất giá trị - kháng cự vỡ thành hỗ trợ,
+# hỗ trợ vỡ thành kháng cự. Bot trước đây chỉ nhớ 1 box gần nhất, box cũ bị quên sạch
+# trong khi thị trường vẫn nhớ các mức đó nhiều ngày sau. Sổ này lưu các mức đổi vai
+# qua các lần chạy (file json, như signal_log) và dùng vào 3 việc:
+#   1. TƯỜNG CHẮN TP: TP2/TP3 nằm sau mức đổi vai ngược hướng -> co về trước mức đó
+#   2. CỘNG HƯỞNG ENTRY: entry box mới trùng mức đổi vai cũ -> ghi chú xác nhận kép
+#   3. VÙNG THEO DÕI: mức đổi vai hiện trong khối zones với nhãn riêng
+# QUAN TRỌNG: mức đổi vai KHÔNG tự phát lệnh - Box Detector vẫn là nơi duy nhất ra lệnh.
+FLIP_LEVELS_PATH = "flipped_levels.json"
+FLIP_MAX_AGE_DAYS = 14        # tuổi thọ tối đa nếu giá chưa chạm (theo yêu cầu: 1-2 tuần)
+FLIP_MAX_TOUCHES = 3          # bị test đến lần thứ 3 -> mức đã yếu, loại (lần test đầu mạnh nhất)
+FLIP_TOUCH_TOL_ATR = 0.3      # dung sai vùng chạm quanh mức = 0.3x ATR M5
+FLIP_TP_CLEARANCE_ATR = 0.3   # co TP về TRƯỚC mức đổi vai 0.3x ATR (không đặt TP ngay trên tường)
+FLIP_CONFLUENCE_ATR = 0.5     # entry cách mức đổi vai <= 0.5x ATR -> ghi nhận cộng hưởng
+
+
+def load_flipped_levels():
+    if not os.path.exists(FLIP_LEVELS_PATH):
+        return []
+    try:
+        with open(FLIP_LEVELS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_flipped_levels(levels):
+    with open(FLIP_LEVELS_PATH, "w", encoding="utf-8") as f:
+        json.dump(levels, f, ensure_ascii=False, indent=2)
+
+
+def register_flipped_level(levels, box_signal):
+    """
+    Box xác nhận breakout (không phải spring) -> ghi cạnh vừa vỡ vào sổ:
+    - Phá LÊN qua cạnh trên  -> cạnh trên thành SUPPORT (kháng cự -> hỗ trợ)
+    - Phá XUỐNG qua cạnh dưới -> cạnh dưới thành RESISTANCE (hỗ trợ -> kháng cự)
+    Spring (phá giả) -> XÓA mức tương ứng nếu đã lỡ ghi ở lần chạy trước: cú phá
+    hóa ra thất bại, cạnh đó KHÔNG đổi vai, vẫn giữ vai trò cũ.
+    Chống trùng bằng khóa (mức làm tròn 1 số lẻ, vai trò).
+    """
+    if not box_signal or not box_signal.get("confirm_dir"):
+        return levels
+    confirm = box_signal["confirm_dir"]
+    if confirm == "up":
+        level, role = box_signal["box_high"], "support"
+    else:
+        level, role = box_signal["box_low"], "resistance"
+
+    key = (round(level, 1), role)
+    if box_signal.get("alignment") == "spring" or str(box_signal.get("state", "")).startswith("spring"):
+        # Phá giả -> cạnh không đổi vai; gỡ bản ghi nếu lần chạy trước (lúc còn tưởng
+        # là breakout thật) đã lỡ đăng ký
+        return [lv for lv in levels
+                if (round(lv["level"], 1), lv["role"]) != key]
+
+    if any((round(lv["level"], 1), lv["role"]) == key for lv in levels):
+        return levels
+    levels.append({
+        "level": round(level, 2), "role": role, "tf": box_signal["tf"],
+        "created_iso": datetime.now(timezone.utc).isoformat(),
+        "last_checked_iso": datetime.now(timezone.utc).isoformat(),
+        "touches": 0,
+    })
+    return levels
+
+
+def maintain_flipped_levels(levels, df_m5, atr_m5):
+    """
+    Bảo trì sổ mỗi lần chạy - 3 luật loại bỏ:
+    1. HẾT HẠN: quá FLIP_MAX_AGE_DAYS (14 ngày) kể từ khi tạo
+    2. BỊ XUYÊN THỦNG: giá ĐÓNG CỬA vượt qua mức ngược vai trò (support mà đóng cửa
+       dưới hẳn / resistance mà đóng cửa trên hẳn) -> mức không còn ý nghĩa
+    3. TEST QUÁ NHIỀU: chạm đến lần thứ FLIP_MAX_TOUCHES -> mức đã cạn lệnh chờ, yếu dần
+    Đếm chạm theo "sự kiện": nến đầu chu kỳ phải NGOÀI vùng rồi có nến chạm vùng mới
+    tính 1 lần chạm (tránh đếm trùng khi giá lượn quanh mức qua nhiều lần chạy).
+    """
+    now = datetime.now(timezone.utc)
+    tol = FLIP_TOUCH_TOL_ATR * atr_m5 if atr_m5 and atr_m5 > 0 else 1.0
+    kept = []
+    for lv in levels:
+        try:
+            created = datetime.fromisoformat(lv["created_iso"])
+        except Exception:
+            continue
+        if (now - created).days >= FLIP_MAX_AGE_DAYS:
+            continue  # luật 1: hết hạn
+
+        try:
+            last_checked = datetime.fromisoformat(lv.get("last_checked_iso", lv["created_iso"]))
+        except Exception:
+            last_checked = created
+        candles = _candles_since(df_m5, last_checked)
+        level = lv["level"]
+
+        if len(candles) > 0:
+            # luật 2: đóng cửa xuyên thủng (vượt qua mức + dung sai)
+            if lv["role"] == "support":
+                broken = (candles["close"] < level - tol).any()
+            else:
+                broken = (candles["close"] > level + tol).any()
+            if broken:
+                continue
+
+            # luật 3: đếm sự kiện chạm
+            first = candles.iloc[0]
+            first_outside = not ((first["low"] - tol) <= level <= (first["high"] + tol))
+            touched = ((candles["low"] - tol <= level) & (level <= candles["high"] + tol)).any()
+            if first_outside and touched:
+                lv["touches"] = lv.get("touches", 0) + 1
+                lv["last_touch_iso"] = now.isoformat()
+            if lv.get("touches", 0) >= FLIP_MAX_TOUCHES:
+                continue
+
+        lv["last_checked_iso"] = now.isoformat()
+        kept.append(lv)
+    return kept
+
+
+def apply_flip_walls(entry_dict, levels, atr_m5):
+    """
+    TƯỜNG CHẮN TP: TP2/TP3 nằm SAU một mức đổi vai ngược hướng lệnh -> co về trước mức
+    đó (mức - đệm). TP1 GIỮ NGUYÊN = 1R để bảo toàn hạch toán R:R và thống kê thắng/thua;
+    nếu có tường trước cả TP1 thì chỉ CẢNH BÁO (bạn tự quyết), không tự đổi.
+    Sửa entry_dict tại chỗ, trả về danh sách ghi chú.
+    """
+    if not levels or not atr_m5 or atr_m5 <= 0:
+        return []
+    direction = entry_dict["direction"]
+    entry = entry_dict["entry"]
+    clearance = FLIP_TP_CLEARANCE_ATR * atr_m5
+    # Tường liên quan: SELL bị chặn bởi SUPPORT nằm dưới entry; BUY bởi RESISTANCE trên entry
+    if direction == "SELL":
+        walls = sorted([lv["level"] for lv in levels
+                        if lv["role"] == "support" and lv["level"] < entry], reverse=True)
+    else:
+        walls = sorted([lv["level"] for lv in levels
+                        if lv["role"] == "resistance" and lv["level"] > entry])
+    if not walls:
+        return []
+
+    notes = []
+    tp1 = entry_dict["tp1"]
+    # Cảnh báo nếu tường chắn trước TP1 (không tự đổi TP1)
+    first_wall = walls[0]
+    tp1_blocked = (direction == "SELL" and tp1 < first_wall) or                   (direction == "BUY" and tp1 > first_wall)
+    if tp1_blocked:
+        notes.append(f"⚠️ Mức đổi vai {first_wall:.2f} chắn TRƯỚC TP1 - cản mạnh, cân nhắc chốt sớm")
+
+    for tp_key in ("tp2", "tp3"):
+        tp = entry_dict[tp_key]
+        for wall in walls:
+            beyond = (direction == "SELL" and tp < wall) or (direction == "BUY" and tp > wall)
+            if beyond:
+                new_tp = round(wall + clearance, 2) if direction == "SELL" else round(wall - clearance, 2)
+                # TP sau khi co vẫn phải xa hơn TP1 (giữ thứ tự TP1<TP2<TP3 theo hướng lệnh)
+                still_valid = (direction == "SELL" and new_tp < tp1) or                               (direction == "BUY" and new_tp > tp1)
+                if still_valid:
+                    entry_dict[tp_key] = new_tp
+                    notes.append(f"🧱 {tp_key.upper()} co về {new_tp:.2f} - trước mức đổi vai {wall:.2f}")
+                break  # chỉ xét tường GẦN NHẤT chắn TP này
+    return notes
+
+
+def flip_confluence_note(entry_dict, levels, atr_m5):
+    """
+    CỘNG HƯỞNG: entry trùng vùng (0.5x ATR) với mức đổi vai CÙNG vai trò với hướng lệnh
+    (BUY tại support đổi vai / SELL tại resistance đổi vai) -> 2 cấu trúc độc lập cùng
+    chỉ 1 mức, bằng chứng mạnh hơn hẳn. Chỉ ghi chú, không cộng điểm (giữ thang điểm
+    bối cảnh ổn định cho việc so sánh thống kê đang chạy).
+    """
+    if not levels or not atr_m5 or atr_m5 <= 0:
+        return None
+    want_role = "support" if entry_dict["direction"] == "BUY" else "resistance"
+    tol = FLIP_CONFLUENCE_ATR * atr_m5
+    for lv in levels:
+        if lv["role"] == want_role and abs(lv["level"] - entry_dict["entry"]) <= tol:
+            role_txt = "kháng cự→hỗ trợ" if want_role == "support" else "hỗ trợ→kháng cự"
+            return (f"⭐ Entry trùng mức đổi vai {lv['level']:.2f} ({role_txt}, "
+                    f"box {lv['tf']} cũ) - xác nhận kép")
+    return None
+
+
 def _candles_since(df_m5, start_time_utc):
     """
     Lấy các nến M5 có thời điểm >= start_time_utc. Datetime của Twelve Data trả về dạng
@@ -1441,7 +1630,7 @@ def manage_active_trades_before_append(log, sig, current_price):
     # --- Quy tắc 3: chống trùng box (kiểm tra TRƯỚC mọi thứ khác) ---
     fp = sig.get("fingerprint")
     if fp and any(r.get("fingerprint") == fp for r in log):
-        return log, False, "Box này đã có lệnh được ghi nhận trước đó - không tạo lệnh trùng, chỉ tham khảo."
+        return log, False, "Box đã có lệnh trước đó - không tạo lệnh trùng"
 
     active = [r for r in log if r.get("mode") == mode and r.get("direction") == direction
               and r.get("status") in ("waiting_fill", "pending")]
@@ -2190,7 +2379,24 @@ def generate_signal(active_zone_directions=None):
     # Tính SỚM ở đây (trước khi quyết định hướng) vì Zone Setup bên dưới cần dùng đến.
     raw_zones = build_raw_zones(ob, sr, fib, htf_levels, atr_m5)
     clusters = merge_zones_into_ranges(raw_zones, atr_m5)
+    # ---- SỔ MỨC ĐỔI VAI: nạp + bảo trì trước (dùng cho zones), đăng ký sau khi có box ----
+    flip_levels = load_flipped_levels()
+    flip_levels = maintain_flipped_levels(flip_levels, df_m5, atr_m5)
+
     zones_above, zones_below = finalize_watch_zones(clusters, current_price, atr_m5)
+
+    # Mức đổi vai vào VÙNG THEO DÕI (ưu tiên đầu danh sách - loại mức chất lượng cao nhất:
+    # cấu trúc đã được thị trường xác nhận bằng breakout thật)
+    for lv in flip_levels:
+        zone = {"price_low": round(lv["level"] - 0.15, 2), "price_high": round(lv["level"] + 0.15, 2),
+                "sources": ["ĐổiVai"], "stars": "⭐",
+                "distance_atr": round(abs(current_price - lv["level"]) / atr_m5, 1) if atr_m5 > 0 else 0,
+                "order_type": "Buy Limit" if lv["role"] == "support" else "Sell Limit"}
+        if lv["level"] > current_price:
+            zones_above.insert(0, zone)
+        elif lv["level"] < current_price:
+            zones_below.insert(0, zone)
+    zones_above, zones_below = zones_above[:3], zones_below[:3]
 
     # Mẫu hình nến mẹ - nến con (Inside Bar), quét trên M15 theo đề xuất
     # (M5 quá nhiễu cho pattern này, M15 phản ánh cấu trúc rõ hơn)
@@ -2215,17 +2421,27 @@ def generate_signal(active_zone_directions=None):
     # nằm LỌT trong phạm vi box H1 đã chọn - đúng cấu trúc "range nhỏ lồng trong range to".
     # Cả 2 đều tự loại bỏ box đã quá xa giá hiện tại (không còn liên quan để giao dịch).
     atr_h1_series = atr(df_h1)
-    box_h1 = find_box_state(df_h1, atr_h1_series)
+    box_h1 = find_box_state(df_h1, atr_h1_series, live_price=current_price)
     box_m15 = None
     if box_h1:
         box_m15 = find_box_state(df_m15, atr_m15_series,
-                                  bound_range=(box_h1["box_low"], box_h1["box_high"]))
+                                  bound_range=(box_h1["box_low"], box_h1["box_high"]),
+                                  live_price=current_price)
     else:
-        box_m15 = find_box_state(df_m15, atr_m15_series)  # không có box H1 thì M15 tìm tự do
+        # không có box H1 thì M15 tìm tự do
+        box_m15 = find_box_state(df_m15, atr_m15_series, live_price=current_price)
     atr_by_tf = {"H1": float(atr_h1_series.iloc[-1]) if len(atr_h1_series) else atr_m5,
                  "M15": float(atr_m15_series.iloc[-1]) if len(atr_m15_series) else atr_m5}
     box_signal = build_box_signal(box_m15, box_h1, atr_m5,
                                    current_price=current_price, atr_by_tf=atr_by_tf)
+
+    # ---- SỔ MỨC ĐỔI VAI (tiếp): đăng ký cạnh vừa vỡ -> lưu -> áp tường TP + cộng hưởng ----
+    flip_levels = register_flipped_level(flip_levels, box_signal)
+    save_flipped_levels(flip_levels)
+    if box_signal and box_signal.get("entries"):
+        for e in box_signal["entries"]:
+            e["wall_notes"] = apply_flip_walls(e, flip_levels, atr_m5)
+            e["flip_note"] = flip_confluence_note(e, flip_levels, atr_m5)
 
     # Xu hướng CHÍNH theo Lý thuyết Dow (chuỗi đỉnh/đáy H1) - dùng để đối chiếu với hướng lệnh
     # box, không phải điều kiện chặn cứng mà chỉ là 1 lớp cảnh báo thêm khi 2 bên mâu thuẫn.
@@ -2448,203 +2664,230 @@ def generate_signal(active_zone_directions=None):
 # ============================================================
 # 4. FORMAT TIN NHẮN & GỬI TELEGRAM
 # ============================================================
+def _esc(s):
+    """Escape ký tự đặc biệt HTML cho Telegram parse_mode=HTML (nội dung động có thể chứa >=, <...)."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def format_message(sig, win_stats=None, active_trades=None):
     """
-    2 kiểu tin nhắn:
-    - CÓ tín hiệu (BUY/SELL): đầy đủ chi tiết kỹ thuật, đặt trong khối "🆕 TÍN HIỆU MỚI"
-      có tiêu đề + đường kẻ riêng - tách biệt rõ với "lệnh đang chạy" (khối khác, dễ nhầm
-      nếu đọc lướt).
-    - KHÔNG có tín hiệu (đa số các lần chạy): RÚT GỌN mạnh, không cần khối tiêu đề to.
-    Các khối "Lệnh đang chạy"/"Vùng theo dõi"/"Thống kê" đều có tiêu đề + đường kẻ riêng,
-    và tự ẩn khi không có gì để hiển thị (không hiện khối rỗng).
+    Bố cục MỚI tối ưu cho màn hình điện thoại dọc (mỗi dòng <= ~34 ký tự, không bị Telegram
+    bẻ dòng vô duyên), dùng HTML bold để tạo PHÂN CẤP thị giác:
+    - LỆNH CHÍNH (entry gần giá nhất - đúng lệnh được log) nổi bật, in đậm, đủ E/SL/TP1-3
+    - Các entry còn lại nén thành "Thang phụ" 1 dòng/entry (E · SL · TP1)
+    - Tên lệnh chuẩn: Sell Limit / Buy Stop... thay cho "CHỜ GIÁ VƯỢT QUA" dài dòng
+    - Ghi chú phụ (phiên, chống trùng...) nén thành footer 1 dòng
     """
-    SEP = "━━━━━━━"
-
-    def section_header(emoji, label):
-        return f"{SEP} {emoji} {label} {SEP}"
-
-    trend_icon = lambda t: "⬆️" if t == "up" else "⬇️"
-    if sig.get("confidence") == "low" and sig["direction"]:
-        icon = "🟡"  # vàng = tín hiệu có nhưng độ tin cậy thấp, khác với xanh/đỏ bình thường
-    else:
-        icon = "🟢" if sig["direction"] == "BUY" else ("🔴" if sig["direction"] == "SELL" else "⚪")
-
     lines = []
-    price_line = f"⚡ XAU/USD {sig['price']:.2f}"
+
+    # ---------- Dòng 1-2: giá + mũi tên đa khung (nén) + điểm bối cảnh ----------
+    price_line = f"⚡ XAU {sig['price']:.2f}"
     if sig["pct_change"] is not None:
         price_line += f" ({sig['pct_change']:+.2f}%)"
-    price_line += f"   {sig['time']}"
+    price_line += f" · {sig['time']}"
     lines.append(price_line)
 
-    # Mũi tên xu hướng đa khung (H4/H1/M30/M15/M5) - luôn hiển thị để theo dõi trực quan
     arrows = sig.get("trend_arrows")
+    arrow_line = ""
     if arrows:
-        arrow_txt = "  ".join(
-            f"{tf}:{'🟢⬆️' if t == 'up' else ('🔴⬇️' if t == 'down' else '➖')}"
-            for tf, t in arrows.items()
-        )
-        lines.append(arrow_txt)
+        sym = lambda t: "↑" if t == "up" else ("↓" if t == "down" else "–")
+        arrow_line = " ".join(f"{tf}{sym(t)}" for tf, t in arrows.items())
+    box = sig.get("box_signal")
+    ctx = box.get("ctx") if box else None
+    if ctx:
+        arrow_line += f" · 💪 {ctx['score']:+d} {_esc(ctx['label'])}"
+    if arrow_line:
+        lines.append(arrow_line)
     lines.append("")
 
-    # ---------- Khối Box: LUÔN hiển thị nếu tìm thấy box (kể cả chưa xác nhận/chưa retest) ----------
-    box = sig.get("box_signal")
+    # ---------- Khối box ----------
     if box:
-        state_label = {"ready": "SẴN SÀNG ENTRY", "waiting_retest": "CHỜ RETEST",
-                       "unconfirmed": "CHƯA XÁC NHẬN",
-                       "spring_ready": "PHÁ VỠ GIẢ ⚡ SẴN SÀNG ENTRY",
-                       "spring_waiting": "PHÁ VỠ GIẢ - CHỜ GIÁ VỀ BIÊN"}.get(box["state"], box["state"])
-        header_emoji = "🆕" if box["state"] in ("ready", "spring_ready") else "📦"
-        lines.append(section_header(header_emoji, f"BOX {box['tf']} - {state_label}"))
-        color_txt = "🟢 XANH" if box["color"] == "green" else "🔴 ĐỎ"
-        lines.append(f"Nến thanh khoản {color_txt}   |   Biên: {box['box_low']:.2f} – {box['box_high']:.2f}")
-        dow_trend = box.get("dow_trend")
-        if dow_trend:
-            lines.append(f"📐 Xu hướng chính (Dow, H1): {'TĂNG (HH+HL)' if dow_trend == 'up' else 'GIẢM (LH+LL)'}")
+        d_icon = {"BUY": "🟢", "SELL": "🔴"}.get(box.get("direction"), "📦")
+        if sig.get("confidence") == "low" and sig.get("direction"):
+            d_icon = "🟡"
+        broke_txt = "phá đỉnh" if box.get("confirm_dir") == "up" else "phá đáy"
+        state = box["state"]
 
-        # Điểm bối cảnh: 5 phiếu độc lập so với hướng lệnh box - thang -5..+4.
-        # Chỉ hiển thị tham khảo, KHÔNG chặn lệnh (đang giai đoạn thu thập dữ liệu).
-        ctx = box.get("ctx")
-        if ctx:
-            lines.append(f"💪 Bối cảnh: {ctx['score']:+d} {ctx['label']}")
-            lines.append(f"   {ctx['icon_line']}")
-
-        ichimoku = box.get("ichimoku")
-        if ichimoku:
-            ichimoku_txt = {
-                "strong_bull": "TRÊN mây XANH (tăng, mạnh nhất)",
-                "new_bull": "TRÊN mây ĐỎ (tăng, mới hình thành)",
-                "strong_bear": "DƯỚI mây ĐỎ (giảm, mạnh nhất)",
-                "new_bear": "DƯỚI mây XANH (giảm, mới hình thành)",
-                "unclear": "TRONG mây (chưa rõ xu hướng)",
-            }[ichimoku["strength"]]
-            lines.append(f"☁️ Ichimoku (H1): Giá {ichimoku_txt}")
-
-        if box["state"] == "unconfirmed":
-            if box.get("in_middle"):
-                lines.append("🚫 Giá đang Ở GIỮA range (không gần biên nào) - KHÔNG khuyến khích vào lệnh lúc này.")
-                lines.append("   Chờ giá tiến gần biên trên/dưới hơn để có điểm tham chiếu SL/TP hợp lý.")
+        # Tiêu đề khối (in đậm)
+        if state in ("ready", "spring_ready"):
+            if box["alignment"] == "spring":
+                title = f"{d_icon} {box['direction']} · BOX {box['tf']} · PHÁ VỠ GIẢ ⚡"
             else:
-                lines.append("⚠️ Box mới hình thành, CHƯA có nến xác nhận breakout - chỉ có entry RỦI RO:")
-                for e in box["entries"]:
-                    e_icon = "🟢" if e["direction"] == "BUY" else "🔴"
-                    sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
-                    lines.append(f"   {e_icon} {e['direction']} tại {e['label']}")
-                    lines.append(f"      📍 E: {e['entry']:.2f}")
-                    lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p)")
-                    lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
-        elif box["state"] in ("spring_ready", "spring_waiting"):
-            broke_txt = "đáy" if box["confirm_dir"] == "down" else "đỉnh"
-            lines.append(f"⚡ Phá {broke_txt} THẤT BẠI: giá đóng cửa quay lại TRONG box trong "
-                          f"{SPRING_WINDOW} nến -> cú phá là QUÉT STOP LOSS (Spring)")
-            lines.append(f"   Đáy/đỉnh cú quét: {box.get('sweep_extreme', 0):.2f} - thủng mức này = setup vô hiệu")
-            for e in box["entries"]:
-                kind_txt = "⏳ CHỜ GIÁ VỀ" if e.get("order_kind", "limit") == "limit" else "⏳ CHỜ GIÁ VƯỢT QUA"
-                sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
-                lines.append(f"   📍 E({e['label']}): {e['entry']:.2f}  {kind_txt}")
-                lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p - sau {broke_txt} cú quét)")
-                lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
-            if box["state"] == "spring_waiting":
-                lines.append("⏳ Chờ giá quay về biên bị quét để entry - chưa vào lệnh")
-            else:
-                lines.append("✅ Giá đang tại biên bị quét - đặt lệnh CHỜ, KHÔNG vào market đuổi giá")
+                align_txt = "THUẬN" if box["alignment"] == "thuận" else "NGƯỢC"
+                title = f"{d_icon} {box['direction']} · BOX {box['tf']} · {broke_txt} ({align_txt})"
+        elif state == "spring_waiting":
+            title = f"📦 BOX {box['tf']} · PHÁ VỠ GIẢ · chờ giá về biên"
+        elif state == "waiting_retest":
+            title = f"📦 BOX {box['tf']} · {broke_txt} · chờ retest"
         else:
-            align_txt = "THUẬN xu hướng" if box["alignment"] == "thuận" else "NGƯỢC xu hướng (thận trọng hơn)"
-            lines.append(f"Xác nhận phá {'đỉnh' if box['confirm_dir']=='up' else 'đáy'} -> "
-                          f"{box['direction']} {align_txt}")
-            for e in box["entries"]:
-                kind_txt = "⏳ CHỜ GIÁ VỀ" if e.get("order_kind", "limit") == "limit" else "⏳ CHỜ GIÁ VƯỢT QUA"
-                sl_p = e.get("sl_points", abs(e["entry"] - e["sl"]))
-                lines.append(f"   📍 E({e['label']}): {e['entry']:.2f}  {kind_txt}")
-                lines.append(f"      🔴 SL: {e['sl']:.2f} ({sl_p:.1f}p)")
-                lines.append(f"      ✅ TP: {e['tp1']:.2f} / {e['tp2']:.2f} / {e['tp3']:.2f} (1R/1.8R/2.8R)")
-            if box["state"] == "waiting_retest":
-                lines.append("⏳ Đã xác nhận nhưng giá CHƯA quay về test biên - chưa nên vào lệnh")
+            title = f"📦 BOX {box['tf']} · chưa xác nhận"
+        lines.append(f"<b>{_esc(title)}</b>")
+
+        # Dòng thông tin box nén: biên + màu nến + trạng thái retest
+        color_txt = "nến 🟢" if box["color"] == "green" else "nến 🔴"
+        info = f"Box {box['box_low']:.2f}–{box['box_high']:.2f} · {color_txt}"
+        if state == "ready":
+            info += " · retest ✅"
+        lines.append(info)
+
+        # Bối cảnh phụ nén 1 dòng: Dow + Ichimoku
+        ctx_bits = []
+        if box.get("dow_trend"):
+            ctx_bits.append(f"📐 Dow{'↑' if box['dow_trend'] == 'up' else '↓'}")
+        ichi = box.get("ichimoku")
+        if ichi:
+            ichi_txt = {"strong_bull": "☁️ trên mây (mạnh)", "new_bull": "☁️ trên mây (mới)",
+                        "strong_bear": "☁️ dưới mây (mạnh)", "new_bear": "☁️ dưới mây (mới)",
+                        "unclear": "☁️ trong mây"}[ichi["strength"]]
+            ctx_bits.append(ichi_txt)
+        if ctx:
+            ctx_bits.append(_esc(ctx["icon_line"]))
+        if ctx_bits:
+            lines.append(" · ".join(ctx_bits))
+
+        if box.get("sweep_extreme") is not None and box["alignment"] == "spring":
+            lines.append(f"⚡ Quét tới {box['sweep_extreme']:.2f} - thủng = vô hiệu")
+
+        entries = box.get("entries", [])
+
+        def _order_name(e):
+            side = "Buy" if e["direction"] == "BUY" else "Sell"
+            kind = "Limit" if e.get("order_kind", "limit") == "limit" else "Stop"
+            return f"{side} {kind}"
+
+        def _entry_extras(e):
+            """Ghi chú tường/cộng hưởng của 1 entry - mỗi cái 1 dòng ngắn."""
+            out = []
+            for wn in e.get("wall_notes", []) or []:
+                out.append(_esc(wn))
+            if e.get("flip_note"):
+                out.append(_esc(e["flip_note"]))
+            return out
+
+        # ----- Trường hợp CÓ LỆNH (ready/spring_ready + đã chọn được entry chính) -----
+        if state in ("ready", "spring_ready") and sig.get("entry") is not None and entries:
+            primary = min(entries, key=lambda e: abs(e["entry"] - sig["entry"]))
+            secondary = [e for e in entries if e is not primary]
+            lines.append("")
+            lines.append(f"<b>▶️ LỆNH CHÍNH · {_order_name(primary)}</b>")
+            lines.append(f"📍 E   <b>{primary['entry']:.2f}</b>  ({_esc(primary['label'])})")
+            lines.append(f"🔴 SL  {primary['sl']:.2f}  ({primary.get('sl_points', abs(primary['entry']-primary['sl'])):.1f}p)")
+            lines.append(f"✅ TP  {primary['tp1']:.2f} → {primary['tp2']:.2f} → {primary['tp3']:.2f}")
+            lines.append("        (1R → 1.8R → 2.8R)")
+            for x in _entry_extras(primary):
+                lines.append(x)
+            if sig.get("rejection_candle"):
+                lines.append("🕯️ Có nến từ chối M15 tại entry ✓")
+
+            if secondary:
+                lines.append("")
+                lines.append("Thang phụ (tham khảo):")
+                for e in secondary:
+                    lines.append(f"· {e['entry']:.2f} {_esc(e['label'])} · SL {e['sl']:.2f} · TP1 {e['tp1']:.2f}")
+                    for x in _entry_extras(e):
+                        lines.append("  " + x)
+
+        # ----- Ready nhưng KHÔNG phát lệnh (entry quá xa / chờ nến từ chối...) -----
+        elif state in ("ready", "spring_ready") and entries:
+            for e in entries:
+                lines.append(f"· {_order_name(e)} {e['entry']:.2f} · SL {e['sl']:.2f} · TP1 {e['tp1']:.2f}")
+            if sig.get("block_reason"):
+                lines.append(f"⛔ {_esc(sig['block_reason'])}")
+
+        # ----- Chờ retest / spring chờ: entries nén 1 dòng -----
+        elif state in ("waiting_retest", "spring_waiting") and entries:
+            for e in entries:
+                lines.append(f"· {_order_name(e)} {e['entry']:.2f} · SL {e['sl']:.2f} · TP1 {e['tp1']:.2f}")
+            lines.append("⏳ Chưa vào lệnh - chờ giá quay về test")
+
+        # ----- Chưa xác nhận: entry rủi ro nén -----
+        elif state == "unconfirmed":
+            if box.get("in_middle"):
+                lines.append("🚫 Giá đang giữa range - không nên vào lệnh, chờ giá gần biên")
             else:
-                lines.append("✅ Giá ĐÃ quay về test - đặt lệnh CHỜ tại entry, KHÔNG vào market đuổi giá")
+                lines.append("⚠️ Chưa xác nhận breakout - entry RỦI RO:")
+                for e in entries:
+                    e_icon = "🟢" if e["direction"] == "BUY" else "🔴"
+                    lines.append(f"{e_icon} {_order_name(e)} {e['entry']:.2f} · SL {e['sl']:.2f} ({e.get('sl_points', 0):.1f}p)")
+                    lines.append(f"   TP {e['tp1']:.2f} → {e['tp2']:.2f} → {e['tp3']:.2f}")
+                    for x in _entry_extras(e):
+                        lines.append("   " + x)
 
-        # Minh bạch: entry bị bộ lọc SL loại - hiện lý do thay vì biến mất trong im lặng
-        for rej in box.get("rejected_entries", []):
-            lines.append(f"🚫 Entry ({rej['label']}) bị loại - {rej['reason']}")
-
-        # Nến từ chối M15 tại vùng entry: có -> tín hiệu chất lượng hơn (hiện tham khảo)
-        if sig.get("rejection_candle"):
-            lines.append("🕯️ Nến từ chối M15 tại vùng entry ✓ (chạm và đóng cửa quay theo hướng lệnh)")
+        # Entry bị bộ lọc SL loại - minh bạch lý do (mọi trạng thái)
+        for rej in box.get("rejected_entries", []) or []:
+            lines.append(f"🚫 {_esc(rej['label'])} bị loại: {_esc(rej['reason'])}")
 
         if sig.get("chase_warning"):
-            lines.append(f"⚖️ {sig['chase_warning']}")
-
+            lines.append(f"⚖️ {_esc(sig['chase_warning'])}")
         if sig.get("confidence") == "low":
             for note in sig.get("confidence_notes", []):
-                lines.append(f"🚨 {note}")
-        if sig["liquidity_note"]:
-            lines.append("⚠️ Thanh khoản thấp (ngoài phiên chính)")
-
-        if sig.get("stack_note"):
-            prefix = "✅" if sig.get("stack_appended") else "🚫"
-            lines.append(f"{prefix} {sig['stack_note']}")
+                lines.append(f"🚨 {_esc(note)}")
         lines.append("")
     else:
-        lines.append(f"⚪ {sig['block_reason'] if sig['block_reason'] else 'Chưa tìm thấy box nào để theo dõi'}")
+        lines.append(f"⚪ {_esc(sig['block_reason'] if sig['block_reason'] else 'Chưa tìm thấy box nào để theo dõi')}")
         lines.append("")
 
-    # ---------- Khối lệnh: TÁCH RIÊNG "chờ khớp" (chưa phải giao dịch thật) và "đang chạy"
-    # (đã khớp, giao dịch thật đang mở) - tránh nhầm lẫn giữa kế hoạch và lệnh đã vào thật ----------
+    # ---------- Lệnh đang chờ khớp / đang chạy ----------
+    if active_trades and active_trades.get("waiting"):
+        lines.append("<b>⏳ CHỜ KHỚP</b>")
+        for t in active_trades["waiting"]:
+            lines.append(_esc(t))
+    if active_trades and active_trades.get("running"):
+        lines.append("<b>✅ ĐANG CHẠY</b>")
+        for t in active_trades["running"]:
+            lines.append(_esc(t))
     if active_trades and (active_trades.get("waiting") or active_trades.get("running")):
-        if active_trades.get("waiting"):
-            lines.append(section_header("⏳", "ĐANG CHỜ KHỚP (chưa vào lệnh)"))
-            for t in active_trades["waiting"]:
-                lines.append(t)
-            lines.append("")
-        if active_trades.get("running"):
-            lines.append(section_header("✅", "ĐANG CHẠY (đã khớp)"))
-            for t in active_trades["running"]:
-                lines.append(t)
-            lines.append("")
+        lines.append("")
 
-    # ---------- Khối "📋 VÙNG THEO DÕI": LUÔN hiển thị (cả khi có tín hiệu lẫn không) ----------
+    # ---------- Thống kê + vùng theo dõi (nén) ----------
+    if win_stats:
+        s = win_stats.get("box")
+        if s:
+            be_txt = f"/{s['breakevens']}BE" if s.get("breakevens") else ""
+            usd_txt = f" {'+' if s['total_usd'] >= 0 else ''}${s['total_usd']}"
+            lines.append(f"📊 Box: {s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}")
+        else:
+            lines.append("📊 Box: chưa đủ dữ liệu")
+        if win_stats.get("ctx_compare"):
+            lines.append(f"💪 {_esc(win_stats['ctx_compare'])}")
+
     def _fmt_zone(z):
         tags = "+".join(z["sources"])
         return f"{z['price_low']:.2f}–{z['price_high']:.2f}({tags}{z.get('stars', '')})"
 
-    if sig.get("zones_above") or sig.get("zones_below"):
-        lines.append(section_header("📋", "VÙNG THEO DÕI"))
-        if sig.get("zones_above"):
-            lines.append("🔼 Trên: " + "  ".join(_fmt_zone(z) for z in sig["zones_above"]))
-        if sig.get("zones_below"):
-            lines.append("🔽 Dưới: " + "  ".join(_fmt_zone(z) for z in sig["zones_below"]))
-        lines.append("")
+    if sig.get("zones_above"):
+        lines.append("📋 ▲ " + " · ".join(_fmt_zone(z) for z in sig["zones_above"]))
+    if sig.get("zones_below"):
+        lines.append("📋 ▼ " + " · ".join(_fmt_zone(z) for z in sig["zones_below"]))
 
-    # ---------- Khối "📊 THỐNG KÊ": thắng/thua 3 nhóm, mỗi nhóm 1 dòng gọn (kèm $ + hòa vốn) ----------
-    if win_stats:
-        def _stat_txt(s):
-            if not s:
-                return "chưa đủ dữ liệu"
-            be_txt = f"/{s['breakevens']}BE" if s.get("breakevens") else ""
-            usd_txt = f" {'+' if s['total_usd'] >= 0 else ''}${s['total_usd']}"
-            return f"{s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}"
+    # Footer: ghi chú phụ - ghi chú NGẮN gộp 1 dòng, ghi chú dài (chống trùng, nhồi lệnh...)
+    # xuống dòng riêng để không bị Telegram bẻ dòng vô duyên
+    if sig.get("stack_note"):
+        prefix = "✅" if sig.get("stack_appended") else "🚫"
+        note = _esc(sig["stack_note"])
+        if len(note) <= 42:
+            lines.append(f"{prefix} {note}")
+        else:
+            lines.append(f"{prefix} {note[:120]}")  # vẫn 1 ý, chấp nhận 2-3 dòng hiển thị nhưng là dòng riêng
+    if sig.get("liquidity_note"):
+        lines.append("⚠️ Ngoài phiên chính - thanh khoản thấp")
 
-        lines.append(section_header("📊", "THỐNG KÊ"))
-        lines.append(f"📦 Box đã xác nhận: {_stat_txt(win_stats.get('box'))}")
-        # So sánh nhóm điểm bối cảnh cao vs thấp - đủ ~30-50 lệnh đóng thì dòng này
-        # quyết định số phận hệ điểm: dự báo được thắng/thua -> nâng thành bộ lọc,
-        # không khác biệt -> giữ làm hiển thị tham khảo.
-        if win_stats.get("ctx_compare"):
-            lines.append(f"💪 {win_stats['ctx_compare']}")
-        lines.append("")
-
+    lines.append("")
     lines.append("⚠️ Chỉ tham khảo | Quản lý vốn 1-2%")
-
     return "\n".join(lines)
-
-
 
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     r = requests.post(url, data=payload, timeout=15)
     if r.status_code != 200:
-        raise Exception(f"Lỗi gửi Telegram: {r.text}")
+        # HTML lỗi (thẻ hở/ký tự lạ) -> gửi lại bản thuần, bỏ thẻ bold, đảm bảo tin luôn tới
+        plain = message.replace("<b>", "").replace("</b>", "") \
+                       .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": plain}, timeout=15)
+        if r.status_code != 200:
+            raise Exception(f"Lỗi gửi Telegram: {r.text}")
     return r.json()
 
 
