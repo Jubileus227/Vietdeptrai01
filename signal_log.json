@@ -41,7 +41,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4038.24039,
     "order_kind": "limit",
@@ -58,7 +58,10 @@
     "loc_max": 2,
     "cancel_level": 4047.94,
     "cancel_side": "above",
-    "fill_time_iso": "2026-07-15T17:30:00+00:00"
+    "fill_time_iso": "2026-07-15T17:30:00+00:00",
+    "outcome_candle_iso": "2026-07-15T17:40:00+00:00",
+    "outcome_time_iso": "2026-07-15T17:45:36.806835+00:00",
+    "usd": -59.0
   },
   {
     "time_iso": "2026-07-15T17:01:18.556241+00:00",
