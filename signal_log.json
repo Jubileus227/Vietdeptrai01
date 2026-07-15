@@ -1,1 +1,28 @@
-[]
+[
+  {
+    "time_iso": "2026-07-15T02:30:54.858323+00:00",
+    "direction": "SELL",
+    "entry": 4032.88848,
+    "sl": 4039.82,
+    "tp1": 4025.96,
+    "score": 0,
+    "mode": "box",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4032.28969,
+    "order_kind": "limit",
+    "fingerprint": "M15:4019.7-4032.9:SELL",
+    "ctx_score": 2,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": 0,
+      "EMA": 1,
+      "MACD": 1,
+      "RSI": 0
+    },
+    "cancel_level": 4026.29,
+    "cancel_side": "above"
+  }
+]
