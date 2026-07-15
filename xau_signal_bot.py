@@ -1722,6 +1722,9 @@ def append_signal(log, sig):
         # nhóm điểm cao/thấp sau 30-50 lệnh (mục đích tồn tại của hệ điểm này)
         "ctx_score": sig["ctx"]["score"] if sig.get("ctx") else None,
         "ctx_votes": sig["ctx"]["votes"] if sig.get("ctx") else None,
+        # Điểm VỊ TRÍ entry (Premium/Discount + FVG) - so sánh ĐẸP vs XẤU sau 30-50 lệnh
+        "loc_score": sig["loc"]["score"] if sig.get("loc") else None,
+        "loc_max": sig["loc"]["max"] if sig.get("loc") else None,
         # Mức vô hiệu hóa tiền đề: lệnh chờ tự HỦY khi giá đóng cửa vượt qua mức này
         # (box thường = đường giữa box; spring = đáy/đỉnh cú quét)
         "cancel_level": sig.get("cancel_level"),
@@ -2272,6 +2275,132 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 
 
 # ============================================================
+# 2d. VỊ TRÍ ENTRY (LOCATION GRADE) - Premium/Discount + FVG (ICT/SMC)
+# ============================================================
+# Khác với ĐIỂM BỐI CẢNH 💪 (đo HƯỚNG lệnh có thuận dòng chảy không), khối 🎯 này đo
+# VỊ TRÍ: cùng một hướng SELL, bán ở giá nào thì có lợi thế?
+# - Premium/Discount: chia đôi con sóng gần nhất tại Fib 0.5. SELL "đẹp" ở nửa TRÊN
+#   (premium - bán giá đắt), BUY "đẹp" ở nửa DƯỚI (discount - mua giá rẻ). Bán sát đáy
+#   sóng = đúng chỗ dễ bật hồi nhất, hướng đúng vẫn thua vì SL bị quét trước.
+# - FVG (Fair Value Gap): vùng giá "bỏ trống" khi nến chạy quá nhanh (high nến 1 không
+#   chạm low nến 3) - giá có xu hướng quay lại LẤP rồi mới đi tiếp. Entry ngay tại FVG
+#   cùng hướng = đứng đúng chỗ "giá có hẹn quay lại".
+# Chỉ CHẤM ĐIỂM + LOG, không chặn lệnh - sau 30-50 lệnh, thống kê ĐẸP vs XẤU tự trả lời
+# phương pháp ICT có tạo khác biệt thật trên XAU không.
+
+FVG_SCAN_CANDLES = 120       # quét FVG trong N nến gần nhất của mỗi khung
+FVG_ENTRY_TOL_ATR = 0.2      # entry cách mép FVG <= 0.2x ATR vẫn tính là "trong vùng"
+
+
+def detect_fvgs(df, max_scan=FVG_SCAN_CANDLES):
+    """
+    Tìm các FVG CHƯA LẤP trong max_scan nến cuối. FVG 3 nến:
+    - Bullish FVG: high nến[i] < low nến[i+2] -> vùng trống (high[i], low[i+2]), đóng vai
+      trò HỖ TRỢ khi giá quay về (BUY zone)
+    - Bearish FVG: low nến[i] > high nến[i+2] -> vùng trống (high[i+2], low[i]), KHÁNG CỰ
+    Đã lấp = có nến sau đó xuyên hết vùng (low <= đáy vùng với bullish / high >= đỉnh vùng
+    với bearish) -> loại. Trả về list {"low","high","direction"} sắp theo mới nhất trước.
+    """
+    if df is None or len(df) < 3:
+        return []
+    recent = df.iloc[-max_scan:].reset_index(drop=True)
+    fvgs = []
+    for i in range(len(recent) - 2):
+        c1, c3 = recent.iloc[i], recent.iloc[i + 2]
+        after = recent.iloc[i + 3:]
+        if c1["high"] < c3["low"]:  # bullish gap
+            gap_lo, gap_hi = c1["high"], c3["low"]
+            filled = (after["low"] <= gap_lo).any() if len(after) else False
+            if not filled:
+                fvgs.append({"low": float(gap_lo), "high": float(gap_hi), "direction": "bull"})
+        elif c1["low"] > c3["high"]:  # bearish gap
+            gap_lo, gap_hi = c3["high"], c1["low"]
+            filled = (after["high"] >= gap_hi).any() if len(after) else False
+            if not filled:
+                fvgs.append({"low": float(gap_lo), "high": float(gap_hi), "direction": "bear"})
+    return list(reversed(fvgs))
+
+
+def entry_location_grade(entry, direction, fib, fvgs_by_tf, atr_m5):
+    """
+    Chấm VỊ TRÍ của entry lệnh chính. Trả về:
+    {"score": int, "max": int, "label": str, "checks": [chuỗi hiển thị]} hoặc None nếu
+    không có dữ liệu nào để chấm. Mỗi tiêu chí 1 điểm:
+    1. Premium/Discount: SELL ở nửa trên sóng / BUY ở nửa dưới sóng (mốc = Fib 0.5)
+    2. FVG: entry nằm trong (hoặc sát <= 0.2 ATR) một FVG CÙNG HƯỚNG chưa lấp (ưu tiên
+       khung lớn: H1 trước, M15 sau)
+    """
+    checks, score, mx = [], 0, 0
+
+    # --- Tiêu chí 1: Premium/Discount ---
+    if fib and fib.get("swing_high") and fib.get("swing_low"):
+        mx += 1
+        mid = (fib["swing_high"] + fib["swing_low"]) / 2
+        in_premium = entry > mid
+        ok = (direction == "SELL" and in_premium) or (direction == "BUY" and not in_premium)
+        zone_txt = "Premium" if in_premium else "Discount"
+        if ok:
+            score += 1
+            side_txt = "nửa TRÊN con sóng (bán giá đắt)" if direction == "SELL"                 else "nửa DƯỚI con sóng (mua giá rẻ)"
+            checks.append(f"· {zone_txt} ✓ - {direction} ở {side_txt}")
+        else:
+            side_txt = "nửa DƯỚI sóng, dễ bán đúng đáy hồi" if direction == "SELL"                 else "nửa TRÊN sóng, dễ mua đúng đỉnh hồi"
+            checks.append(f"· {zone_txt} ✗ - {direction} ở {side_txt}")
+
+    # --- Tiêu chí 2: FVG cùng hướng ---
+    want = "bull" if direction == "BUY" else "bear"
+    tol = FVG_ENTRY_TOL_ATR * atr_m5 if atr_m5 and atr_m5 > 0 else 0.5
+    has_any_fvg_data = any(v is not None for v in fvgs_by_tf.values())
+    if has_any_fvg_data:
+        mx += 1
+        hit_tf = None
+        for tf_name in ("H1", "M15"):  # ưu tiên khung lớn
+            for g in (fvgs_by_tf.get(tf_name) or []):
+                if g["direction"] == want and (g["low"] - tol) <= entry <= (g["high"] + tol):
+                    hit_tf = tf_name
+                    break
+            if hit_tf:
+                break
+        if hit_tf:
+            score += 1
+            checks.append(f"· FVG {hit_tf} ✓ - entry trong vùng giá bỏ trống chưa lấp")
+        else:
+            checks.append("· FVG ✗ - entry không trùng vùng giá bỏ trống nào")
+
+    if mx == 0:
+        return None
+    if score == mx:
+        label = "ĐẸP"
+    elif score == 0:
+        label = "XẤU"
+    else:
+        label = "TRUNG BÌNH"
+    return {"score": score, "max": mx, "label": label, "checks": checks}
+
+
+def compare_loc_win_rate(log):
+    """
+    So sánh win rate nhóm vị trí ĐẸP (đủ điểm) vs XẤU (0 điểm) trên các lệnh đã đóng -
+    câu trả lời bằng dữ liệu cho câu hỏi "Premium/Discount + FVG có tạo khác biệt thật
+    trên XAU không". Trả về chuỗi hiển thị hoặc None nếu chưa có bản ghi mang điểm vị trí.
+    """
+    closed = [r for r in log if r.get("status") in ("win", "loss")
+              and r.get("loc_score") is not None and r.get("loc_max")]
+    if not closed:
+        return None
+
+    def _grp(records):
+        if not records:
+            return "0 lệnh"
+        w = sum(1 for r in records if r["status"] == "win")
+        return f"{w}W/{len(records) - w}L ({round(w / len(records) * 100)}%)"
+
+    good = [r for r in closed if r["loc_score"] == r["loc_max"]]
+    bad = [r for r in closed if r["loc_score"] == 0]
+    return f"Vị trí ĐẸP: {_grp(good)} | XẤU: {_grp(bad)}"
+
+
+# ============================================================
 # 2e. ĐIỂM BỐI CẢNH (CONTEXT SCORE) - lớp tin cậy, KHÔNG phải cò súng
 # ============================================================
 # Khác hẳn hệ chấm điểm cũ (đã bỏ vì cộng nhiều chỉ báo TRÙNG thông tin - EMA↓ + MA↓ +
@@ -2708,6 +2837,12 @@ def generate_signal(active_zone_directions=None):
         })
         result["fib_note"] = fib_confluence_note(fib, primary["entry"], primary["sl"], primary["tp1"], atr_m5)
 
+        # 🎯 VỊ TRÍ ENTRY (Premium/Discount + FVG): chấm cho LỆNH CHÍNH - đo "chỗ đứng"
+        # của giá entry trong con sóng, tách bạch với điểm bối cảnh 💪 (đo hướng)
+        fvgs_by_tf = {"H1": detect_fvgs(df_h1), "M15": detect_fvgs(df_m15)}
+        result["loc"] = entry_location_grade(primary["entry"], primary["direction"],
+                                              fib, fvgs_by_tf, atr_m5)
+
         # Cảnh báo "không mua đuổi": giá hiện tại cách entry khá xa (2.5-4x ATR M5)
         # -> nhấn mạnh đây là lệnh CHỜ, tuyệt đối không vào market đuổi theo.
         if dist_atr >= CHASE_WARNING_ATR:
@@ -2835,6 +2970,14 @@ def format_message(sig, win_stats=None, active_trades=None):
             if sig.get("rejection_candle"):
                 lines.append("🕯️ Có nến từ chối M15 tại entry ✓")
 
+            # 🎯 Vị trí entry (Premium/Discount + FVG) - chỉ hiện cho lệnh chính
+            loc = sig.get("loc")
+            if loc:
+                lines.append("")
+                lines.append(f"<b>🎯 Vị trí entry: {_esc(loc['label'])} ({loc['score']}/{loc['max']})</b>")
+                for c in loc["checks"]:
+                    lines.append(_esc(c))
+
             if secondary:
                 lines.append("")
                 lines.append("Thang phụ (tham khảo):")
@@ -2922,6 +3065,8 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"🧭 Fade 2 đầu: {f['wins']}W/{f['losses']}L{be_txt} ({f['win_rate']}%){usd_txt}")
         if win_stats.get("ctx_compare"):
             lines.append(f"💪 {_esc(win_stats['ctx_compare'])}")
+        if win_stats.get("loc_compare"):
+            lines.append(f"🎯 {_esc(win_stats['loc_compare'])}")
 
     def _fmt_zone(z):
         tags = "+".join(z["sources"])
@@ -3078,6 +3223,7 @@ if __name__ == "__main__":
         "box": compute_win_rate(log, mode="box"),
         "fade": compute_win_rate(log, mode="fade"),
         "ctx_compare": compare_ctx_win_rate(log),
+        "loc_compare": compare_loc_win_rate(log),
     }
 
     message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
