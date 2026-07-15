@@ -560,10 +560,10 @@ def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None
 
     if box["state"] == "unconfirmed":
         result["in_middle"] = box.get("in_middle", False)
-        if result["in_middle"]:
-            # Giá đang ở GIỮA box (không gần biên nào) - KHÔNG khuyến khích vào lệnh vì chưa
-            # rõ hướng và không có điểm tham chiếu hợp lý để đặt SL/TP lúc này.
-            return result
+        # THAY ĐỔI: giá ở GIỮA box giờ KHÔNG trả về rỗng nữa - đây chính là lúc tốt nhất
+        # để lập KẾ HOẠCH 2 KỊCH BẢN (fade 2 cạnh, đặt lệnh chờ trước khi giá chạm vùng
+        # tranh chấp). Entry vẫn được tạo như unconfirmed thường; khác biệt chỉ ở cách
+        # hiển thị (khối kế hoạch) và việc log mode="fade" để thống kê riêng.
         # Entry RỦI RO: fade 2 cạnh (chưa rõ hướng breakout) - SL theo ATR khung của box,
         # kẹp trong [BOX_SL_RISK_MIN, BOX_SL_RISK_MAX] thay cho số cố định 10 giá cũ.
         risk_dist = min(max(BOX_SL_RISK_ATR * atr_tf, BOX_SL_RISK_MIN), BOX_SL_RISK_MAX) \
@@ -1748,6 +1748,44 @@ def active_zone_setup_directions(log):
             if r.get("mode") == "zone_setup" and r.get("status") in ("waiting_fill", "pending")}
 
 
+def append_fade_plans(log, box_signal, signal_price):
+    """
+    Log CẢ 2 kịch bản fade (SELL cạnh trên + BUY cạnh dưới) của box CHƯA XÁC NHẬN với
+    mode="fade" - thống kê RIÊNG, không trộn với lệnh box chuẩn. Mục đích: đánh giá
+    KHÁCH QUAN bằng dữ liệu xem setup "vùng tranh chấp phản ứng" có edge thật không,
+    thay vì tin vào cảm giác. Cả 2 lệnh cùng được theo dõi path-aware như lệnh thường:
+    - Chưa khớp mà giá đóng cửa vượt QUA SL (tức cạnh đã vỡ hẳn) -> tự hủy (cancel_level=SL)
+    - Khớp rồi thì TP1/SL cái nào chạm trước tính trước
+    Chống trùng bằng fingerprint FADE riêng từng hướng - mỗi box mỗi hướng chỉ log 1 lần.
+    """
+    if not box_signal or box_signal.get("state") != "unconfirmed":
+        return log, []
+    appended = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for e in box_signal.get("entries", []):
+        fp = (f"{box_signal['tf']}:{box_signal['box_low']:.1f}-"
+              f"{box_signal['box_high']:.1f}:FADE:{e['direction']}")
+        if any(r.get("fingerprint") == fp for r in log):
+            continue
+        log.append({
+            "time_iso": now_iso,
+            "direction": e["direction"],
+            "entry": e["entry"], "sl": e["sl"], "tp1": e["tp1"],
+            "score": 0, "mode": "fade", "confidence": "normal",
+            "entry_type": "limit", "status": "waiting_fill",
+            "timeout_hours": SIGNAL_TIMEOUT_HOURS,
+            "signal_price": signal_price,
+            "order_kind": e.get("order_kind", "limit"),
+            "fingerprint": fp,
+            # Tiền đề của lệnh fade = "cạnh box giữ được". Giá đóng cửa vượt QUA SL khi
+            # chưa khớp nghĩa là cạnh đã vỡ hẳn -> hủy kế hoạch, không đu theo.
+            "cancel_level": e["sl"],
+            "cancel_side": "above" if e["direction"] == "SELL" else "below",
+        })
+        appended.append(e["direction"])
+    return log, appended
+
+
 def compute_win_rate(log, mode=None, confidence=None):
     """
     Tính tỷ lệ thắng/thua + tổng $ lãi/lỗ + số lệnh hòa vốn. Nếu truyền mode
@@ -2800,10 +2838,21 @@ def format_message(sig, win_stats=None, active_trades=None):
                 lines.append(f"· {_order_name(e)} {e['entry']:.2f} · SL {e['sl']:.2f} · TP1 {e['tp1']:.2f}")
             lines.append("⏳ Chưa vào lệnh - chờ giá quay về test")
 
-        # ----- Chưa xác nhận: entry rủi ro nén -----
+        # ----- Chưa xác nhận: giá GIỮA box = khối KẾ HOẠCH 2 KỊCH BẢN, gần biên = entry rủi ro -----
         elif state == "unconfirmed":
             if box.get("in_middle"):
-                lines.append("🚫 Giá đang giữa range - không nên vào lệnh, chờ giá gần biên")
+                lines.append("🧭 Giá giữa box - kế hoạch 2 đầu:")
+                for e in entries:
+                    arrow = "⬆️ Nếu TĂNG chạm" if e["direction"] == "SELL" else "⬇️ Nếu GIẢM chạm"
+                    star = " ⭐" if e.get("flip_note") else ""
+                    lines.append(f"{arrow} {e['entry']:.2f}{star}:")
+                    lines.append(f"   {_order_name(e)} {e['entry']:.2f} · SL {e['sl']:.2f} ({e.get('sl_points', 0):.1f}p)")
+                    lines.append(f"   TP {e['tp1']:.2f} → {e['tp2']:.2f} → {e['tp3']:.2f}")
+                    if e.get("flip_note"):
+                        lines.append(f"   {_esc(e['flip_note'])}")
+                    for wn in e.get("wall_notes", []) or []:
+                        lines.append(f"   {_esc(wn)}")
+                lines.append("🛡️ BE khi lãi ≥0.5R, không dời sớm hơn")
             else:
                 lines.append("⚠️ Chưa xác nhận breakout - entry RỦI RO:")
                 for e in entries:
@@ -2848,6 +2897,11 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"📊 Box: {s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}")
         else:
             lines.append("📊 Box: chưa đủ dữ liệu")
+        f = win_stats.get("fade")
+        if f:
+            be_txt = f"/{f['breakevens']}BE" if f.get("breakevens") else ""
+            usd_txt = f" {'+' if f['total_usd'] >= 0 else ''}${f['total_usd']}"
+            lines.append(f"🧭 Fade 2 đầu: {f['wins']}W/{f['losses']}L{be_txt} ({f['win_rate']}%){usd_txt}")
         if win_stats.get("ctx_compare"):
             lines.append(f"💪 {_esc(win_stats['ctx_compare'])}")
 
@@ -2996,9 +3050,15 @@ if __name__ == "__main__":
 
     if should_append:
         log = append_signal(log, signal)
+    # Log kế hoạch fade 2 đầu của box CHƯA XÁC NHẬN (mode="fade", thống kê riêng) -
+    # để đánh giá khách quan setup "vùng tranh chấp phản ứng" bằng dữ liệu thật
+    log, fade_appended = append_fade_plans(log, signal.get("box_signal"), signal["price"])
+    if fade_appended:
+        print(f"Đã log {len(fade_appended)} kế hoạch fade: {', '.join(fade_appended)}")
     save_signal_log(log)
     win_stats = {
         "box": compute_win_rate(log, mode="box"),
+        "fade": compute_win_rate(log, mode="fade"),
         "ctx_compare": compare_ctx_win_rate(log),
     }
 
