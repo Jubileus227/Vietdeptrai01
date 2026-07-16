@@ -4,7 +4,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:01:05.490581+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -12,7 +12,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:05:33.861643+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -20,7 +20,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:10:51.408988+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -28,7 +28,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:15:44.134273+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -36,7 +36,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:20:59.742226+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -44,7 +44,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:25:36.651878+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -52,7 +52,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:30:59.011023+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -60,7 +60,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:35:32.615440+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -68,7 +68,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:40:52.199728+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -76,7 +76,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:45:42.328452+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -84,7 +84,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:50:53.019898+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -92,7 +92,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T13:55:42.347782+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.080110+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
     "touches": 0
   },
   {
@@ -100,7 +100,15 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-07-16T14:01:17.100188+00:00",
-    "last_checked_iso": "2026-07-16T14:01:17.100193+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.510762+00:00",
+    "touches": 0
+  },
+  {
+    "level": 4012.55,
+    "role": "resistance",
+    "tf": "H1",
+    "created_iso": "2026-07-16T14:05:39.538195+00:00",
+    "last_checked_iso": "2026-07-16T14:05:39.538202+00:00",
     "touches": 0
   }
 ]
