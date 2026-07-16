@@ -1539,16 +1539,18 @@ def update_signal_outcomes(log, df_m5, current_price):
                 rec["status"] = "pending"
                 rec["fill_time_iso"] = c["datetime_utc"].isoformat()
 
-            # QUAN TRỌNG - NẾN KHỚP LỆNH chỉ được tính phần giá SAU ĐIỂM KHỚP:
-            # phần "biết chắc xảy ra sau khớp" là đoạn vượt qua entry THEO CHIỀU DI CHUYỂN
-            # của giá lúc khớp. Ví dụ Sell Limit khớp bởi nến ĐI LÊN 4040->4052: low 4040
-            # xảy ra TRƯỚC khi giá chạm entry 4051 -> không được lấy low đó so với TP
-            # (lỗi thực tế: bot ghi "thắng" bằng chuyển động tồn tại trước cả vị thế).
-            # - Nến đi LÊN khớp lệnh (Sell Limit / Buy Stop): đoạn hậu khớp = [entry, high]
-            # - Nến đi XUỐNG khớp lệnh (Buy Limit / Sell Stop): đoạn hậu khớp = [low, entry]
-            if fill_this_candle:
-                travel_up = (direction == "SELL" and order_kind == "limit") or \
-                            (direction == "BUY" and order_kind == "stop")
+            # QUAN TRỌNG - NẾN KHỚP LỆNH: chỉ phần giá SAU ĐIỂM KHỚP mới được tính.
+            # - Lệnh LIMIT (giá đi NGƯỢC hướng lệnh tới entry): đoạn hậu khớp chắc chắn là
+            #   phần vượt entry theo chiều di chuyển -> [entry, high] (Sell Limit) hoặc
+            #   [low, entry] (Buy Limit). Phía TP nằm ở phần TRƯỚC khớp -> không được tính
+            #   (lỗi cũ: Sell Limit "thắng" bằng cái low xảy ra trước khi giá chạm entry).
+            # - Lệnh STOP (giá đi CÙNG hướng lệnh xuyên entry): mọi mức giá vượt entry theo
+            #   chiều di chuyển đều hậu khớp -> phía TP hợp lệ. NHƯNG phía SL vẫn phải xét
+            #   ĐỦ BIÊN ĐỘ NẾN: nến dài có thể khớp -> BẬT NGƯỢC quét SL -> rồi mới chạy
+            #   tới TP (thua thật). Không xác minh được thứ tự trong 1 nến -> để quy tắc
+            #   thận trọng "SL ưu tiên trước" bên dưới xử lý: chạm cả 2 phía = THUA.
+            if fill_this_candle and order_kind == "limit":
+                travel_up = (direction == "SELL")
                 eff_lo = entry if travel_up else lo
                 eff_hi = hi if travel_up else entry
             else:
@@ -1577,6 +1579,11 @@ def update_signal_outcomes(log, df_m5, current_price):
             if hit_tp:
                 rec["outcome_candle_iso"] = c["datetime_utc"].isoformat()
                 rec["outcome_time_iso"] = now.isoformat()
+                # Cờ kiểm toán: thắng quyết định NGAY TRONG nến khớp (chỉ xảy ra với lệnh
+                # stop, nến dài xuyên entry chạy thẳng tới TP, phía SL sạch) - hợp lệ về
+                # logic nhưng đáng soi lại vì nến dài thực tế thường kèm trượt giá
+                if fill_this_candle:
+                    rec["same_candle_fill_tp"] = True
                 rec["status"] = "win"
                 rec["usd"] = round((tp1 - entry) * USD_PER_POINT, 2) if direction == "BUY" \
                     else round((entry - tp1) * USD_PER_POINT, 2)
