@@ -4,7 +4,7 @@ on:
   workflow_dispatch:          # cho phép bấm chạy thủ công / cron-job.org gọi qua API dispatch
 
 permissions:
-  contents: write   # cần quyền ghi để bot tự lưu lại lịch sử tín hiệu (signal_log.json)
+  contents: write   # cần quyền ghi để bot tự lưu lại các file trạng thái về repo
 
 jobs:
   run-bot:
@@ -29,11 +29,22 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: python xau_signal_bot.py
 
-      - name: Lưu lại lịch sử tín hiệu (signal_log.json)
+      # Lưu lại 4 FILE TRẠNG THÁI về repo - GitHub Actions reset hệ thống file mỗi lần
+      # chạy, file nào không commit là mất sạch:
+      # - signal_log.json        : lịch sử tín hiệu + thống kê thắng/thua
+      # - flipped_levels.json    : sổ mức đổi vai (kháng cự <-> hỗ trợ)
+      # - box_state.json         : box đã xác nhận đang ghim chờ retest
+      # - h1_native_cache.json   : cache nến H1 gốc theo giờ - KHÔNG commit file này thì
+      #   mỗi lần chạy đều gọi API H1 -> 864 credits/ngày, VƯỢT trần free 800
+      # Dùng "git add -A --" để commit được cả trường hợp file BỊ XÓA (vd: bot gỡ ghim
+      # box_state.json) - thiếu điều này thì ghim cũ sẽ "sống dậy" ở lần chạy sau.
+      - name: Lưu lại trạng thái bot
         run: |
           git config user.name "xau-signal-bot"
           git config user.email "actions@github.com"
-          git add signal_log.json
-          git diff --cached --quiet || git commit -m "Cập nhật lịch sử tín hiệu [skip ci]"
+          for f in signal_log.json flipped_levels.json box_state.json h1_native_cache.json; do
+            git add -A -- "$f" 2>/dev/null || true
+          done
+          git diff --cached --quiet || git commit -m "Cập nhật trạng thái bot [skip ci]"
           git pull --rebase
           git push
