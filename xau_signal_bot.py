@@ -86,6 +86,56 @@ def get_ohlc(interval, outputsize=100):
     return df
 
 
+H1_NATIVE_CACHE_PATH = "h1_native_cache.json"
+
+
+def fetch_h1_native_cached(outputsize=300):
+    """
+    Lấy nến H1 GỐC từ API, cache theo GIỜ - chỉ gọi API khi đã sang giờ UTC mới (tức có
+    nến H1 mới đóng), giữa các giờ dùng lại cache -> chi phí chỉ ~24 credits/ngày.
+
+    Vì sao cần H1 gốc khi đã có resample từ M5? KHÔNG phải vì râu nến (về toán học,
+    high H1 = max các high M5 trong giờ - gộp và gốc trùng nhau nếu feed không thủng),
+    mà vì ĐỘ DÀI LỊCH SỬ: 1000 nến M5 chỉ gộp được ~83 nến H1, trong khi Ichimoku H1
+    cần ~78 nến (Senkou B 52 + displacement 26) - đang chạy sát nút; Dow/Fib/FVG H1
+    cũng chỉ nhìn được ~3.5 ngày. H1 gốc outputsize=300 -> nhìn 12+ ngày.
+
+    Trả về DataFrame H1 (đã loại nến đang hình thành) hoặc None nếu lỗi - caller tự
+    rơi về resample từ M5 như cũ, không bao giờ mất dữ liệu.
+    """
+    now = datetime.now(timezone.utc)
+    hour_key = now.strftime("%Y-%m-%dT%H")
+    # Cache còn trong cùng giờ UTC -> dùng lại, không tốn credit
+    if os.path.exists(H1_NATIVE_CACHE_PATH):
+        try:
+            with open(H1_NATIVE_CACHE_PATH, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            if cache.get("hour_key") == hour_key and cache.get("rows"):
+                df = pd.DataFrame(cache["rows"])
+                df["datetime"] = pd.to_datetime(df["datetime"])
+                return df
+        except Exception:
+            pass
+
+    try:
+        df = get_ohlc("1h", outputsize=outputsize)
+        # Loại nến H1 đang hình thành (chưa đóng) - cùng lý do với resample_ohlc
+        if len(df) > 0:
+            last_end = df["datetime"].iloc[-1] + pd.Timedelta(hours=1)
+            now_naive = now.replace(tzinfo=None)
+            if last_end > pd.Timestamp(now_naive):
+                df = df.iloc[:-1].reset_index(drop=True)
+        rows = [{"datetime": d.isoformat(), "open": float(o), "high": float(h),
+                 "low": float(l), "close": float(c)}
+                for d, o, h, l, c in zip(df["datetime"], df["open"], df["high"], df["low"], df["close"])]
+        with open(H1_NATIVE_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"hour_key": hour_key, "rows": rows}, f, ensure_ascii=False)
+        return df
+    except Exception as e:
+        print(f"Lỗi lấy H1 gốc (rơi về resample M5): {e}")
+        return None
+
+
 def resample_ohlc(df_m5, rule, drop_incomplete=True):
     """
     Gộp nến M5 thành khung lớn hơn (15min/30min/1h) NGAY TRONG MÁY,
@@ -2653,12 +2703,24 @@ def compare_ctx_win_rate(log, high_min=CTX_HIGH_GROUP_MIN):
 # ============================================================
 def generate_signal(active_zone_directions=None):
     active_zone_directions = active_zone_directions or set()
-    # Chỉ gọi API 1 lần (lấy nhiều nến M5), sau đó tự gộp thành M15/M30/H1
-    # -> tiết kiệm request, cho phép chạy mỗi 5 phút mà vẫn trong hạn mức free
+    # 3 lời gọi API mỗi lần chạy (~600 credits/ngày, trần free 800):
+    # 1. M5 x1000 - nguồn chính cho box/chỉ báo, tự gộp thành M15/M30
+    # 2. M1 x1000 (~16.7h) - RIÊNG cho theo dõi kết quả: độ phân giải đường đi giá gấp 5,
+    #    nến khớp "mơ hồ" (quét cả SL lẫn TP trong 1 nến M5) phần lớn được M1 phân xử rõ
+    # 3. H1 gốc x300 - cache theo giờ (~24 credits/ngày), lịch sử dài cho Ichimoku/Dow/FVG
     df_m5 = get_ohlc("5min", outputsize=1000)  # ~3.5 ngày dữ liệu M5
+    try:
+        df_m1 = get_ohlc("1min", outputsize=1000)
+        if df_m1 is None or len(df_m1) < 50:
+            df_m1 = None
+    except Exception as e:
+        print(f"Lỗi lấy M1 (tracking rơi về M5): {e}")
+        df_m1 = None  # LƯỚI AN TOÀN: M1 lỗi -> tracking dùng M5 như cũ, không mất lượt theo dõi
     df_m15 = resample_ohlc(df_m5, "15min")
     df_m30 = resample_ohlc(df_m5, "30min")
-    df_h1 = resample_ohlc(df_m5, "1h")
+    df_h1_native = fetch_h1_native_cached()
+    df_h1 = df_h1_native if (df_h1_native is not None and len(df_h1_native) >= 60) \
+        else resample_ohlc(df_m5, "1h")
 
     # Phát hiện thị trường ĐANG ĐỨNG YÊN (nghỉ lễ, ngoài lịch cuối tuần cố định) dựa
     # thẳng vào dữ liệu giá thật - is_market_closed() chỉ bắt được cuối tuần, không
@@ -2957,7 +3019,9 @@ def generate_signal(active_zone_directions=None):
         "trend_arrows": trend_arrows,
     }
 
-    result["df_m5"] = df_m5  # dùng cho theo dõi kết quả path-aware ở vòng chạy chính
+    result["df_m5"] = df_m5
+    # Nguồn nến cho theo dõi kết quả path-aware: ưu tiên M1 (độ phân giải gấp 5), rơi về M5 nếu M1 lỗi
+    result["df_track"] = df_m1 if df_m1 is not None else df_m5
 
     if box_signal and box_signal["state"] in ("ready", "spring_ready") and box_signal.get("entries"):
         # Entry GẦN GIÁ NHẤT làm đại diện theo dõi thắng/thua - hợp lý hơn "entry đầu tiên"
@@ -3373,9 +3437,9 @@ if __name__ == "__main__":
 
     # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
     # (path-aware: duyệt high/low từng nến M5 kể từ lúc tạo/khớp lệnh, không chỉ giá hiện tại)
-    log = update_signal_outcomes(log, signal["df_m5"], signal["price"])
+    log = update_signal_outcomes(log, signal["df_track"], signal["price"])
     # Hủy các lệnh chờ có tiền đề đã chết (breakout bị phủ nhận / phá giả hóa phá thật)
-    log = cancel_dead_premise_orders(log, signal["df_m5"])
+    log = cancel_dead_premise_orders(log, signal["df_track"])
 
     # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
     log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
