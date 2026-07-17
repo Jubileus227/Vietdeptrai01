@@ -1233,7 +1233,11 @@ def refresh_htf_cache_if_needed():
             pass
 
     try:
-        df_h1 = get_ohlc("1h", outputsize=170)   # ~1 tuần
+        # Tái dùng cache H1 GỐC theo giờ (fetch_h1_native_cached) thay vì gọi API riêng -
+        # tiết kiệm 1 credit/lần cập nhật; chỉ còn H4 phải gọi thật (~24 credits/ngày)
+        df_h1 = fetch_h1_native_cached()
+        if df_h1 is None or len(df_h1) < 100:
+            df_h1 = get_ohlc("1h", outputsize=170)   # ~1 tuần (fallback khi cache H1 lỗi)
         df_h4 = get_ohlc("4h", outputsize=190)   # ~1 tháng
     except Exception:
         return cache  # lỗi mạng -> dùng cache cũ nếu có, không crash
@@ -3421,64 +3425,80 @@ def send_telegram_photo(photo_path, caption=""):
 # 5. CHẠY BOT
 # ============================================================
 if __name__ == "__main__":
-    if is_market_closed():
-        print("Thị trường XAU/USD đang đóng cửa cuối tuần -> bỏ qua lần chạy này (không gọi API, không gửi Telegram).")
-        exit(0)
+    # LƯỚI ĐỠ TOÀN CỤC: bất kỳ lỗi nào (điển hình: hết quota API giữa ngày -> get_ohlc
+    # raise) trước đây làm workflow chết đỏ với "exit code 1" mà không ai biết vì sao.
+    # Giờ: in traceback đầy đủ vào log Actions + CỐ GẮNG báo qua Telegram (kênh bạn
+    # thực sự theo dõi) + thoát mã 0 để không spam đỏ - lỗi API tạm thời sẽ tự hết ở
+    # lượt chạy sau hoặc khi quota reset 00:00 UTC.
+    try:
+        if is_market_closed():
+            print("Thị trường XAU/USD đang đóng cửa cuối tuần -> bỏ qua lần chạy này (không gọi API, không gửi Telegram).")
+            exit(0)
 
-    log = load_signal_log()
-    active_zone_dirs = active_zone_setup_directions(log)  # vestigial, không còn dùng (Zone Setup đã bị thay thế)
+        log = load_signal_log()
+        active_zone_dirs = active_zone_setup_directions(log)  # vestigial, không còn dùng (Zone Setup đã bị thay thế)
 
-    print("Đang lấy dữ liệu và phân tích...")
-    signal = generate_signal(active_zone_directions=active_zone_dirs)
+        print("Đang lấy dữ liệu và phân tích...")
+        signal = generate_signal(active_zone_directions=active_zone_dirs)
 
-    if signal.get("market_flat"):
-        print("Thị trường đang đứng yên (nghỉ lễ/dữ liệu không đổi) -> bỏ qua lần chạy này, không gửi Telegram.")
-        exit(0)
+        if signal.get("market_flat"):
+            print("Thị trường đang đứng yên (nghỉ lễ/dữ liệu không đổi) -> bỏ qua lần chạy này, không gửi Telegram.")
+            exit(0)
 
-    # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
-    # (path-aware: duyệt high/low từng nến M5 kể từ lúc tạo/khớp lệnh, không chỉ giá hiện tại)
-    log = update_signal_outcomes(log, signal["df_track"], signal["price"])
-    # Hủy các lệnh chờ có tiền đề đã chết (breakout bị phủ nhận / phá giả hóa phá thật)
-    log = cancel_dead_premise_orders(log, signal["df_track"])
+        # --- Cập nhật kết quả các tín hiệu cũ TRƯỚC khi xét nhồi lệnh/hòa vốn cho tín hiệu mới ---
+        # (path-aware: duyệt high/low từng nến M5 kể từ lúc tạo/khớp lệnh, không chỉ giá hiện tại)
+        log = update_signal_outcomes(log, signal["df_track"], signal["price"])
+        # Hủy các lệnh chờ có tiền đề đã chết (breakout bị phủ nhận / phá giả hóa phá thật)
+        log = cancel_dead_premise_orders(log, signal["df_track"])
 
-    # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
-    log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
-    signal["stack_note"] = stack_note
-    signal["stack_appended"] = should_append
+        # --- Quản lý nhồi lệnh: hòa vốn lệnh cũ đã an toàn, chỉ cho nhồi thêm khi điểm mạnh hơn rõ rệt ---
+        log, should_append, stack_note = manage_active_trades_before_append(log, signal, signal["price"])
+        signal["stack_note"] = stack_note
+        signal["stack_appended"] = should_append
 
-    active_trades = active_trades_summary(log, current_price=signal["price"])
+        active_trades = active_trades_summary(log, current_price=signal["price"])
 
-    if should_append:
-        log = append_signal(log, signal)
-    # Log kế hoạch fade 2 đầu của box CHƯA XÁC NHẬN (mode="fade", thống kê riêng) -
-    # để đánh giá khách quan setup "vùng tranh chấp phản ứng" bằng dữ liệu thật
-    log, fade_appended = append_fade_plans(log, signal.get("box_signal"), signal["price"])
-    if fade_appended:
-        print(f"Đã log {len(fade_appended)} kế hoạch fade: {', '.join(fade_appended)}")
-    save_signal_log(log)
-    win_stats = {
-        "box": compute_win_rate(log, mode="box"),
-        "fade": compute_win_rate(log, mode="fade"),
-        "ctx_compare": compare_ctx_win_rate(log),
-        "loc_compare": compare_loc_win_rate(log),
-    }
+        if should_append:
+            log = append_signal(log, signal)
+        # Log kế hoạch fade 2 đầu của box CHƯA XÁC NHẬN (mode="fade", thống kê riêng) -
+        # để đánh giá khách quan setup "vùng tranh chấp phản ứng" bằng dữ liệu thật
+        log, fade_appended = append_fade_plans(log, signal.get("box_signal"), signal["price"])
+        if fade_appended:
+            print(f"Đã log {len(fade_appended)} kế hoạch fade: {', '.join(fade_appended)}")
+        save_signal_log(log)
+        win_stats = {
+            "box": compute_win_rate(log, mode="box"),
+            "fade": compute_win_rate(log, mode="fade"),
+            "ctx_compare": compare_ctx_win_rate(log),
+            "loc_compare": compare_loc_win_rate(log),
+        }
 
-    message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
-    print(message)
+        message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
+        print(message)
 
-    print("\nĐang gửi vào Telegram...")
-    send_telegram(message)
+        print("\nĐang gửi vào Telegram...")
+        send_telegram(message)
 
-    if signal.get("box_signal") and signal.get("box_chart_df") is not None:
+        if signal.get("box_signal") and signal.get("box_chart_df") is not None:
+            try:
+                box = signal["box_signal"]
+                chart_path = generate_box_chart(signal["box_chart_df"], box)
+                state_txt = {"ready": "Sẵn sàng entry", "waiting_retest": "Chờ retest",
+                             "unconfirmed": "Chưa xác nhận", "spring_ready": "Phá vỡ giả - sẵn sàng",
+                             "spring_waiting": "Phá vỡ giả - chờ giá về biên"}.get(box["state"], box["state"])
+                send_telegram_photo(chart_path, caption=f"📊 Box {box['tf']} - {state_txt}")
+                print("Đã gửi ảnh biểu đồ.")
+            except Exception as e:
+                print(f"Lỗi khi vẽ/gửi ảnh biểu đồ (bỏ qua, không ảnh hưởng tin nhắn chính): {e}")
+
+        print("Đã gửi xong! Kiểm tra Telegram của bạn.")
+    except Exception as _fatal:
+        import traceback as _tb
+        print("===== BOT GẶP LỖI - TRACEBACK ĐẦY ĐỦ =====")
+        _tb.print_exc()
         try:
-            box = signal["box_signal"]
-            chart_path = generate_box_chart(signal["box_chart_df"], box)
-            state_txt = {"ready": "Sẵn sàng entry", "waiting_retest": "Chờ retest",
-                         "unconfirmed": "Chưa xác nhận", "spring_ready": "Phá vỡ giả - sẵn sàng",
-                         "spring_waiting": "Phá vỡ giả - chờ giá về biên"}.get(box["state"], box["state"])
-            send_telegram_photo(chart_path, caption=f"📊 Box {box['tf']} - {state_txt}")
-            print("Đã gửi ảnh biểu đồ.")
-        except Exception as e:
-            print(f"Lỗi khi vẽ/gửi ảnh biểu đồ (bỏ qua, không ảnh hưởng tin nhắn chính): {e}")
-
-    print("Đã gửi xong! Kiểm tra Telegram của bạn.")
+            send_telegram(f"⚠️ Bot lỗi, lượt chạy này bị bỏ qua:\n{type(_fatal).__name__}: {str(_fatal)[:300]}")
+            print("Đã báo lỗi qua Telegram.")
+        except Exception:
+            print("Không gửi được thông báo lỗi qua Telegram.")
+        raise SystemExit(0)
