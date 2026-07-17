@@ -29,20 +29,22 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: python xau_signal_bot.py
 
-      # Lưu lại 4 FILE TRẠNG THÁI về repo - GitHub Actions reset hệ thống file mỗi lần
+      # Lưu lại 5 FILE TRẠNG THÁI về repo - GitHub Actions reset hệ thống file mỗi lần
       # chạy, file nào không commit là mất sạch:
       # - signal_log.json        : lịch sử tín hiệu + thống kê thắng/thua
       # - flipped_levels.json    : sổ mức đổi vai (kháng cự <-> hỗ trợ)
       # - box_state.json         : box đã xác nhận đang ghim chờ retest
-      # - h1_native_cache.json   : cache nến H1 gốc theo giờ - KHÔNG commit file này thì
-      #   mỗi lần chạy đều gọi API H1 -> 864 credits/ngày, VƯỢT trần free 800
+      # - h1_native_cache.json   : cache nến H1 gốc theo giờ
+      # - htf_levels_cache.json  : cache mức H1/H4 (THỦ PHẠM VỠ QUOTA cũ: không commit
+      #   file này thì H1+H4 bị gọi thật MỖI 5 PHÚT thay vì mỗi giờ -> vượt trần 800/ngày
+      #   và bot chết giữa chiều UTC với exit code 1)
       # Dùng "git add -A --" để commit được cả trường hợp file BỊ XÓA (vd: bot gỡ ghim
       # box_state.json) - thiếu điều này thì ghim cũ sẽ "sống dậy" ở lần chạy sau.
       - name: Lưu lại trạng thái bot
         run: |
           git config user.name "xau-signal-bot"
           git config user.email "actions@github.com"
-          for f in signal_log.json flipped_levels.json box_state.json h1_native_cache.json; do
+          for f in signal_log.json flipped_levels.json box_state.json h1_native_cache.json htf_levels_cache.json; do
             git add -A -- "$f" 2>/dev/null || true
           done
           git diff --cached --quiet || git commit -m "Cập nhật trạng thái bot [skip ci]"
