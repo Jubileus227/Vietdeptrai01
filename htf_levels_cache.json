@@ -1,0 +1,405 @@
+{
+  "updated_at": "2026-07-19T21:02:07.530587+00:00",
+  "h1_levels": [
+    {
+      "price": 4179.37894,
+      "type": "high"
+    },
+    {
+      "price": 4137.70275,
+      "type": "high"
+    },
+    {
+      "price": 4137.70275,
+      "type": "high"
+    },
+    {
+      "price": 4127.90217,
+      "type": "high"
+    },
+    {
+      "price": 4133.93964,
+      "type": "high"
+    },
+    {
+      "price": 4125.6944,
+      "type": "high"
+    },
+    {
+      "price": 4120.82252,
+      "type": "high"
+    },
+    {
+      "price": 4111.63825,
+      "type": "high"
+    },
+    {
+      "price": 4111.63825,
+      "type": "high"
+    },
+    {
+      "price": 4111.62809,
+      "type": "high"
+    },
+    {
+      "price": 4111.62809,
+      "type": "high"
+    },
+    {
+      "price": 4111.62809,
+      "type": "high"
+    },
+    {
+      "price": 4111.62809,
+      "type": "high"
+    },
+    {
+      "price": 4111.62809,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4111.62981,
+      "type": "high"
+    },
+    {
+      "price": 4111.62981,
+      "type": "high"
+    },
+    {
+      "price": 4111.62981,
+      "type": "high"
+    },
+    {
+      "price": 4111.62981,
+      "type": "high"
+    },
+    {
+      "price": 4111.62981,
+      "type": "high"
+    },
+    {
+      "price": 4112.96916,
+      "type": "high"
+    },
+    {
+      "price": 4099.20066,
+      "type": "high"
+    },
+    {
+      "price": 4097.88226,
+      "type": "high"
+    },
+    {
+      "price": 4077.62508,
+      "type": "high"
+    },
+    {
+      "price": 4080.34808,
+      "type": "high"
+    },
+    {
+      "price": 4068.67931,
+      "type": "high"
+    },
+    {
+      "price": 4045.84468,
+      "type": "high"
+    },
+    {
+      "price": 3961.80817,
+      "type": "low"
+    },
+    {
+      "price": 4022.84979,
+      "type": "high"
+    },
+    {
+      "price": 4002.87485,
+      "type": "low"
+    },
+    {
+      "price": 4018.00997,
+      "type": "high"
+    },
+    {
+      "price": 4010.73964,
+      "type": "high"
+    },
+    {
+      "price": 4010.4813,
+      "type": "low"
+    },
+    {
+      "price": 4010.48047,
+      "type": "low"
+    },
+    {
+      "price": 4010.73719,
+      "type": "high"
+    },
+    {
+      "price": 4010.46996,
+      "type": "low"
+    },
+    {
+      "price": 4010.71052,
+      "type": "high"
+    },
+    {
+      "price": 4010.71052,
+      "type": "high"
+    },
+    {
+      "price": 4010.46997,
+      "type": "low"
+    },
+    {
+      "price": 4010.71052,
+      "type": "high"
+    },
+    {
+      "price": 4010.46997,
+      "type": "low"
+    },
+    {
+      "price": 4010.71052,
+      "type": "high"
+    },
+    {
+      "price": 4010.46997,
+      "type": "low"
+    },
+    {
+      "price": 4010.71052,
+      "type": "high"
+    },
+    {
+      "price": 4010.46997,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47643,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47643,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47643,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47642,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47642,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47642,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47642,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47641,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.47641,
+      "type": "low"
+    },
+    {
+      "price": 4010.47641,
+      "type": "low"
+    }
+  ],
+  "h4_levels": [
+    {
+      "price": 4216.38487,
+      "type": "high"
+    },
+    {
+      "price": 4195.86288,
+      "type": "high"
+    },
+    {
+      "price": 3961.49428,
+      "type": "low"
+    },
+    {
+      "price": 3949.44708,
+      "type": "low"
+    },
+    {
+      "price": 3959.59368,
+      "type": "low"
+    },
+    {
+      "price": 4195.33479,
+      "type": "high"
+    },
+    {
+      "price": 4202.03378,
+      "type": "high"
+    },
+    {
+      "price": 4179.37894,
+      "type": "high"
+    },
+    {
+      "price": 4134.11055,
+      "type": "high"
+    },
+    {
+      "price": 4137.70275,
+      "type": "high"
+    },
+    {
+      "price": 4137.70275,
+      "type": "high"
+    },
+    {
+      "price": 4125.6944,
+      "type": "high"
+    },
+    {
+      "price": 4111.6298,
+      "type": "high"
+    },
+    {
+      "price": 4112.96916,
+      "type": "high"
+    },
+    {
+      "price": 4099.20066,
+      "type": "high"
+    },
+    {
+      "price": 4080.34808,
+      "type": "high"
+    },
+    {
+      "price": 4022.84979,
+      "type": "high"
+    },
+    {
+      "price": 3961.80817,
+      "type": "low"
+    },
+    {
+      "price": 4010.46996,
+      "type": "low"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    },
+    {
+      "price": 4010.71696,
+      "type": "high"
+    }
+  ],
+  "atr_h1": 0.337,
+  "atr_h4": 5.667
+}
