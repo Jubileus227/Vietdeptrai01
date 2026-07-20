@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-07-20T02:10:30.113078+00:00",
+  "updated_at": "2026-07-20T03:15:32.676178+00:00",
   "h1_levels": [
     {
       "price": 4137.70275,
@@ -134,108 +134,8 @@
       "type": "low"
     },
     {
-      "price": 4022.84979,
-      "type": "high"
-    },
-    {
-      "price": 4018.00997,
-      "type": "high"
-    },
-    {
-      "price": 4010.73964,
-      "type": "high"
-    },
-    {
-      "price": 4010.73719,
-      "type": "high"
-    },
-    {
-      "price": 4010.71052,
-      "type": "high"
-    },
-    {
-      "price": 4010.71052,
-      "type": "high"
-    },
-    {
-      "price": 4010.71052,
-      "type": "high"
-    },
-    {
-      "price": 4010.71052,
-      "type": "high"
-    },
-    {
-      "price": 4010.71052,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.77281,
-      "type": "high"
+      "price": 3983.42894,
+      "type": "low"
     }
   ],
   "h4_levels": [
@@ -310,20 +210,8 @@
     {
       "price": 3961.80817,
       "type": "low"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
-    },
-    {
-      "price": 4010.71696,
-      "type": "high"
     }
   ],
-  "atr_h1": 7.745,
-  "atr_h4": 10.908
+  "atr_h1": 10.075,
+  "atr_h4": 12.036
 }
