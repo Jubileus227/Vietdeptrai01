@@ -1,0 +1,24 @@
+{
+  "box_high": 4019.94194,
+  "box_low": 4003.7351,
+  "box_mid": 4011.8385200000002,
+  "color": "green",
+  "direction": "BUY",
+  "alignment": "ngược",
+  "confirm_dir": "up",
+  "entries": [
+    {
+      "label": "mid",
+      "price": 4011.8385200000002
+    },
+    {
+      "label": "low",
+      "price": 4003.7351
+    }
+  ],
+  "tf": "M15",
+  "state": "ready",
+  "fingerprint": "M15:4003.7-4019.9:BUY",
+  "confirmed_at_iso": "2026-07-20T14:30:40.479623+00:00",
+  "retest_tol": 2.269
+}
