@@ -15,7 +15,7 @@
   "tf": "H1",
   "state": "spring_ready",
   "fingerprint": "H1:4001.7-4026.9:BUY:SPRING",
-  "confirmed_at_iso": "2026-07-21T19:55:32.135405+00:00",
-  "retest_tol": 4.058,
+  "confirmed_at_iso": "2026-07-21T20:00:44.587283+00:00",
+  "retest_tol": 3.729,
   "sweep_extreme": 3999.73871
 }
