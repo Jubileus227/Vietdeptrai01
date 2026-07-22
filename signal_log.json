@@ -390,13 +390,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "cancelled",
     "timeout_hours": 4,
     "signal_price": 4148.94485,
     "order_kind": "stop",
     "fingerprint": "H4:4076.6-4125.7:FADE:SELL",
     "cancel_level": 4137.69,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4137.69 - tiền đề setup không còn, hủy lệnh chờ"
   },
   {
     "time_iso": "2026-07-22T15:00:50.041259+00:00",
