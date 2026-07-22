@@ -136,6 +136,45 @@ def fetch_h1_native_cached(outputsize=300):
         return None
 
 
+def resample_h1_to_h4(df_h1, anchor_hours=(0, 4, 8, 12, 16, 20)):
+    """
+    Gộp nến H1 GỐC thành nến H4 - KHÔNG gọi API riêng (0 credit), tái dùng df_h1 sẵn có.
+    Vì sao không dùng interval "4h" của Twelve Data: mốc neo "4h" của họ theo múi giờ
+    riêng, dễ lệch với H4 quen nhìn trên TradingView. Ở đây tự neo mốc 00/04/08/12/16/20
+    UTC -> nhất quán tuyệt đối với H1.
+
+    XỬ LÝ NẾN CHƯA ĐÓNG (điểm mấu chốt): nến H4 chỉ HỢP LỆ khi có ĐỦ 4 nến H1 con đã đóng
+    trong khối 4 giờ đó. Nến H4 đang hình thành (mới 1-3 nến H1) bị LOẠI hoàn toàn - biến
+    câu hỏi khó "nến H4 đã đóng chưa" thành phép đếm đơn giản "đủ 4 nến H1 chưa", không
+    phụ thuộc múi giờ API. Nến H4 dở dang mà lọt vào sẽ làm box H4 nhấp nháy và xác nhận
+    breakout giả (close còn đổi tới 3.5h nữa).
+    """
+    if df_h1 is None or len(df_h1) < 4:
+        return None
+    df = df_h1.copy()
+    if df["datetime"].dt.tz is not None:
+        df["datetime"] = df["datetime"].dt.tz_localize(None)
+    # Gán mỗi nến H1 vào khối H4 theo giờ UTC (floor về mốc neo gần nhất phía dưới)
+    hours = df["datetime"].dt.hour
+    block_hour = (hours // 4) * 4  # 0-3->0, 4-7->4, ... khớp anchor_hours
+    block_start = df["datetime"].dt.normalize() + pd.to_timedelta(block_hour, unit="h")
+    df = df.assign(_block=block_start)
+
+    rows = []
+    for block, g in df.groupby("_block"):
+        g = g.sort_values("datetime")
+        # Chỉ nhận khối ĐỦ 4 nến H1 con - loại nến H4 đang hình thành
+        if len(g) < 4:
+            continue
+        rows.append({"datetime": block, "open": float(g["open"].iloc[0]),
+                     "high": float(g["high"].max()), "low": float(g["low"].min()),
+                     "close": float(g["close"].iloc[-1])})
+    if len(rows) < 10:
+        return None
+    out = pd.DataFrame(rows).sort_values("datetime").reset_index(drop=True)
+    return out
+
+
 def resample_ohlc(df_m5, rule, drop_incomplete=True):
     """
     Gộp nến M5 thành khung lớn hơn (15min/30min/1h) NGAY TRONG MÁY,
@@ -258,6 +297,9 @@ def detect_bos_level(df, lookback=20):
 
 BOX_LOOKBACK = 100          # số nến quét ngược để tìm nến thanh khoản
 BOX_RANGE_ATR_MULT = 2.0    # nến thanh khoản phải có biên độ >= 2x ATR trung bình gần đó
+BOX_RANGE_ATR_MULT_H4 = 1.8 # H4 dùng ngưỡng thấp hơn: ít nến hơn nhiều (75 nến H4 vs 300 H1)
+                            # nên nến thanh khoản H4 hiếm hơn - 1.8x để có đủ mẫu mà đo, sau
+                            # vài tuần nhìn phân bố range/ATR thật rồi tinh chỉnh bằng dữ liệu
 BOX_RETEST_TOLERANCE_ATR = 0.3  # giá được coi là "đã quay về test" nếu cách điểm entry <= 0.3x ATR
 # (SL cố định 20/10 giá cũ đã bỏ - SL giờ tính theo CẤU TRÚC box, xem structural_sl bên dưới)
 BOX_MAX_DISTANCE_ATR = 8.0  # box cách giá hiện tại quá xa (theo ATR HIỆN TẠI) thì coi là hết liên quan
@@ -578,7 +620,7 @@ def structural_sl(direction, entry_label, box_low, box_mid, box_high, atr_tf):
     return round(sl, 2), round(dist, 2)
 
 
-def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None):
+def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None, box_h4=None):
     """
     Chọn box CHÍNH để giao dịch - ưu tiên box đã 'ready' (sẵn sàng entry), khung H1 trước
     (cấu trúc lớn hơn, đáng tin hơn), rồi tới M15. Nếu không box nào 'ready', vẫn chọn 1 box
@@ -589,13 +631,22 @@ def build_box_signal(box_m15, box_h1, atr_m5, current_price=None, atr_by_tf=None
     """
     def _priority(b):
         if not b:
-            return -1
-        # spring_ready cao nhất: setup phá vỡ giả có điểm vô hiệu hóa rõ ràng nhất
-        return {"spring_ready": 4, "ready": 3, "spring_waiting": 2, "waiting_retest": 2,
-                "unconfirmed": 1}.get(b["state"], 0)
+            return (-1, 0)
+        # Ưu tiên 2 tầng: (độ CHÍN của setup, độ LỚN của khung).
+        # Độ chín thắng trước - H4 mới waiting_retest KHÔNG được nuốt H1 đã ready (bỏ lỡ
+        # cơ hội thật). Cùng độ chín thì khung lớn hơn thắng (H4 > H1 > M15: cấu trúc lớn
+        # đáng tin hơn khi xung đột hướng).
+        maturity = {"spring_ready": 4, "ready": 3, "spring_waiting": 2, "waiting_retest": 2,
+                    "unconfirmed": 1}.get(b["state"], 0)
+        tf_rank = {"H4": 3, "H1": 2, "M15": 1}.get(b.get("_tf_tag"), 0)
+        return (maturity, tf_rank)
 
     atr_by_tf = atr_by_tf or {}
-    candidates = [("H1", box_h1), ("M15", box_m15)]
+    # Gắn thẻ khung vào từng box để _priority so được độ lớn khung
+    for tf_tag, b in (("H4", box_h4), ("H1", box_h1), ("M15", box_m15)):
+        if b:
+            b["_tf_tag"] = tf_tag
+    candidates = [("H4", box_h4), ("H1", box_h1), ("M15", box_m15)]
     candidates.sort(key=lambda x: _priority(x[1]), reverse=True)
     tf_name, box = candidates[0]
     if not box:
@@ -1725,7 +1776,7 @@ def manage_active_trades_before_append(log, sig, current_price):
     """
     direction = sig.get("direction")
     mode = sig.get("signal_mode")
-    if not direction or mode not in ("trend", "mean_reversion", "box"):
+    if not direction or mode not in ("trend", "mean_reversion", "box", "box_h4"):
         return log, True, None
 
     # --- Quy tắc 3: chống trùng box (kiểm tra TRƯỚC mọi thứ khác) ---
@@ -2372,6 +2423,10 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 BOX_STATE_PATH = "box_state.json"
 BOX_TRACK_MAX_HOURS = 24   # theo dõi retest tối đa 24h sau xác nhận (mức đổi vai dài hạn
                            # hơn đã có sổ flipped_levels lo, ghim chỉ phục vụ setup retest tươi)
+PIN_ABANDON_ATR = 6.0      # VAN XẢ: entry cách giá > 6x ATR theo hướng THUẬN -> giá đã bỏ đi,
+                           # setup lỡ, nhả ghim để box mới ở vùng giá hiện tại lên sóng
+PIN_SPRING_MAX_HOURS = 6   # VAN XẢ: box spring chờ retest quá 6h mà giá không quay về biên
+                           # bị quét -> phá vỡ giả đã thất bại thực tế (giá đi luôn), nhả ghim
 
 
 def load_pinned_box():
@@ -2397,15 +2452,20 @@ def clear_pinned_box():
         pass
 
 
-def evaluate_pinned_box(pin, df_m5, live_price):
+def evaluate_pinned_box(pin, df_m5, live_price, atr_m5=None):
     """
     Đánh giá lại box đã ghim bằng dữ liệu hiện tại. Trả về dict box (đúng cấu trúc
     find_box_state trả ra) với state cập nhật, hoặc None nếu box đã chết:
     - HẾT HẠN: quá BOX_TRACK_MAX_HOURS kể từ lúc xác nhận
-    - VÔ HIỆU: giá đi XUYÊN NGƯỢC hết box (phá lên mà giá về dưới cạnh dưới / phá xuống
-      mà giá vượt cạnh trên); spring: giá thủng đáy/đỉnh cú quét
-    - RETEST: kiểm tra bằng đường đi high/low nến M5 KỂ TỪ LÚC XÁC NHẬN (không phụ
-      thuộc thời điểm chạy) -> ready/spring_ready khi đã chạm vùng entry
+    - VÔ HIỆU (xuyên ngược): giá đi XUYÊN NGƯỢC hết box (phá lên mà giá về dưới cạnh dưới
+      / phá xuống mà giá vượt cạnh trên); spring: giá thủng đáy/đỉnh cú quét
+    - GIÁ BỎ ĐI QUÁ XA (van xả): entry gần nhất cách giá > PIN_ABANDON_ATR lần ATR theo
+      HƯỚNG THUẬN của lệnh -> setup đã lỡ, giá không quay lại, NHẢ GHIM để box mới ở vùng
+      giá hiện tại lên sóng. Sửa bệnh "bot ôm 1 box cả ngày": box 4001-4026 ghim từ sáng
+      trong khi giá chạy lên 4071, entry cách 22x ATR mà vẫn treo.
+    - SPRING HẾT KIÊN NHẪN (van xả): box spring chờ retest quá PIN_SPRING_MAX_HOURS mà giá
+      không quay về biên bị quét -> phá giả đã thất bại thực tế, nhả.
+    - RETEST: kiểm tra bằng đường đi high/low nến M5 KỂ TỪ LÚC XÁC NHẬN -> ready khi chạm entry
     """
     try:
         confirmed_at = datetime.fromisoformat(pin["confirmed_at_iso"])
@@ -2416,7 +2476,26 @@ def evaluate_pinned_box(pin, df_m5, live_price):
         return None
 
     is_spring = str(pin.get("state", "")).startswith("spring")
-    # --- Vô hiệu hóa ---
+
+    # --- Van xả 1: SPRING hết kiên nhẫn ---
+    if is_spring and (now - confirmed_at).total_seconds() > PIN_SPRING_MAX_HOURS * 3600:
+        return None
+
+    # --- Van xả 2: GIÁ BỎ ĐI QUÁ XA theo hướng thuận ---
+    if atr_m5 and atr_m5 > 0:
+        entries = pin.get("entries", [])
+        if entries:
+            nearest = min(entries, key=lambda e: abs(e["price"] - live_price))
+            dist_atr = abs(live_price - nearest["price"]) / atr_m5
+            direction = pin["direction"]
+            # "thuận" = giá đã đi đúng hướng lệnh và bỏ xa entry (BUY: giá vượt LÊN trên
+            # entry; SELL: giá tụt XUỐNG dưới entry) - cơ hội vào đã lỡ, không chờ nữa
+            gone_favorable = (direction == "BUY" and live_price > nearest["price"]) or \
+                             (direction == "SELL" and live_price < nearest["price"])
+            if gone_favorable and dist_atr > PIN_ABANDON_ATR:
+                return None
+
+    # --- Vô hiệu hóa (xuyên ngược) ---
     if is_spring:
         sweep = pin.get("sweep_extreme")
         if sweep is not None:
@@ -2815,6 +2894,16 @@ def generate_signal(active_zone_directions=None):
         # không có box H1 thì M15 tìm tự do
         box_m15 = find_box_state(df_m15, atr_m15_series, live_price=current_price)
 
+    # ---- BOX H4 (setup swing): gộp từ nến H1 gốc, 0 credit; chỉ dùng nến H4 đủ 4 con
+    # đã đóng (resample_h1_to_h4 tự loại nến đang hình thành). Ngưỡng thanh khoản 1.8x. ----
+    df_h4 = resample_h1_to_h4(df_h1)
+    box_h4 = None
+    atr_h4_series = None
+    if df_h4 is not None and len(df_h4) >= 30:
+        atr_h4_series = atr(df_h4)
+        box_h4 = find_box_state(df_h4, atr_h4_series, range_mult=BOX_RANGE_ATR_MULT_H4,
+                                 live_price=current_price)
+
     # ---- BOX GHIM: box đã xác nhận từ lần chạy trước được ƯU TIÊN, chống box mới cướp sóng ----
     pinned = load_pinned_box()
     if pinned:
@@ -2824,17 +2913,20 @@ def generate_signal(active_zone_directions=None):
             clear_pinned_box()
             pinned = None
     if pinned:
-        pinned_box = evaluate_pinned_box(pinned, df_m5, current_price)
+        pinned_box = evaluate_pinned_box(pinned, df_m5, current_price, atr_m5=atr_m5)
         if pinned_box is None:
             clear_pinned_box()  # hết hạn/vô hiệu -> box mới được lên sóng từ lần này
+        elif pinned.get("tf") == "H4":
+            box_h4 = pinned_box
         elif pinned.get("tf") == "H1":
             box_h1 = pinned_box
         else:
             box_m15 = pinned_box
     atr_by_tf = {"H1": float(atr_h1_series.iloc[-1]) if len(atr_h1_series) else atr_m5,
-                 "M15": float(atr_m15_series.iloc[-1]) if len(atr_m15_series) else atr_m5}
+                 "M15": float(atr_m15_series.iloc[-1]) if len(atr_m15_series) else atr_m5,
+                 "H4": float(atr_h4_series.iloc[-1]) if atr_h4_series is not None and len(atr_h4_series) else atr_m5}
     box_signal = build_box_signal(box_m15, box_h1, atr_m5,
-                                   current_price=current_price, atr_by_tf=atr_by_tf)
+                                   current_price=current_price, atr_by_tf=atr_by_tf, box_h4=box_h4)
 
     # ---- SỔ MỨC ĐỔI VAI (tiếp): đăng ký cạnh vừa vỡ -> lưu -> áp tường TP + cộng hưởng ----
     flip_levels = register_flipped_level(flip_levels, box_signal)
@@ -2844,7 +2936,7 @@ def generate_signal(active_zone_directions=None):
     # retest, kể cả khi box mới xuất hiện. Bảo toàn confirmed_at gốc nếu là cùng box. ----
     if box_signal and box_signal.get("confirm_dir") and \
             box_signal["state"] in ("waiting_retest", "ready", "spring_waiting", "spring_ready"):
-        raw_src = box_h1 if box_signal["tf"] == "H1" else box_m15
+        raw_src = {"H4": box_h4, "H1": box_h1, "M15": box_m15}.get(box_signal["tf"])
         if raw_src:
             fp = make_box_fingerprint(box_signal["tf"], box_signal["box_low"],
                                        box_signal["box_high"], box_signal["direction"],
@@ -2911,7 +3003,8 @@ def generate_signal(active_zone_directions=None):
         block_reason = "Chưa tìm thấy nến tập trung thanh khoản nào đủ điều kiện trong phạm vi quét"
     elif box_signal["state"] in ("ready", "spring_ready"):
         direction = box_signal["direction"]
-        signal_mode = "box"
+        # Box H4 = setup swing, log mode RIÊNG "box_h4" để thống kê tách biệt với box H1
+        signal_mode = "box_h4" if box_signal["tf"] == "H4" else "box"
         if box_signal["alignment"] == "spring":
             pass  # setup Spring có khối hiển thị riêng đầy đủ trong tin nhắn, không cần note
         elif box_signal["alignment"] == "ngược":
@@ -3299,6 +3392,11 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"📊 Box: {s['wins']}W/{s['losses']}L{be_txt} ({s['win_rate']}%){usd_txt}")
         else:
             lines.append("📊 Box: chưa đủ dữ liệu")
+        h4s = win_stats.get("box_h4")
+        if h4s and h4s.get("total"):
+            be_txt = f"/{h4s['breakevens']}BE" if h4s.get("breakevens") else ""
+            usd_txt = f" {'+' if h4s['total_usd'] >= 0 else ''}${h4s['total_usd']}"
+            lines.append(f"📊 Box H4: {h4s['wins']}W/{h4s['losses']}L{be_txt} ({h4s['win_rate']}%){usd_txt}")
         f = win_stats.get("fade")
         if f:
             be_txt = f"/{f['breakevens']}BE" if f.get("breakevens") else ""
@@ -3468,6 +3566,7 @@ if __name__ == "__main__":
         save_signal_log(log)
         win_stats = {
             "box": compute_win_rate(log, mode="box"),
+            "box_h4": compute_win_rate(log, mode="box_h4"),
             "fade": compute_win_rate(log, mode="fade"),
             "ctx_compare": compare_ctx_win_rate(log),
             "loc_compare": compare_loc_win_rate(log),
