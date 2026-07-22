@@ -329,7 +329,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4114.93797,
     "order_kind": "limit",
@@ -345,6 +345,7 @@
     "loc_score": 2,
     "loc_max": 2,
     "cancel_level": 4140.79,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-07-22T12:00:00+00:00"
   }
 ]
