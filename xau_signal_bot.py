@@ -1544,28 +1544,47 @@ def flip_confluence_note(entry_dict, levels, atr_m5):
     return None
 
 
-def _candles_since(df_m5, start_time_utc):
+def _candles_since(df_m5, start_time_utc, exclusive=False):
     """
-    Lấy các nến M5 có thời điểm >= start_time_utc (UTC aware).
+    Lấy các nến có thời điểm >= start_time_utc (hoặc > nếu exclusive=True).
 
-    LƯỚI AN TOÀN MÚI GIỜ: dù API đã được ép timezone=UTC, vẫn tự kiểm tra - nếu nến
-    MỚI NHẤT lệch quá 30 phút so với giờ UTC hiện tại (bot chỉ chạy khi thị trường mở,
-    nến M5 cuối phải rất gần hiện tại), nghĩa là dữ liệu đang mang múi giờ khác ->
-    TỰ NEO LẠI: dịch toàn bộ timestamp theo offset (giờ thật - nến cuối). Không có lưới
-    này, dữ liệu lệch múi làm nến QUÁ KHỨ lọt qua bộ lọc "sau khi tạo lệnh" -> lệnh
-    khớp ảo bằng chuyển động giá đã xảy ra trước khi lệnh tồn tại.
+    exclusive=True dùng cho lệnh ĐÃ KHỚP ở lượt chạy TRƯỚC: loại chính nến khớp ra khỏi
+    cửa sổ đánh giá. Nến khớp đã được chấm đúng (chỉ phần giá SAU điểm khớp) ngay tại
+    lượt nó khớp; nếu lượt sau đưa nó vào lại thì nó được tính với TOÀN BỘ biên độ ->
+    phần giá TRƯỚC điểm khớp bị tính thành chạm TP/SL -> thắng/thua ảo.
+
+    LƯỚI AN TOÀN MÚI GIỜ (đã siết): chỉ neo lại timestamp khi độ lệch giống LỆCH MÚI GIỜ
+    THẬT - tức xấp xỉ bội số GIỜ TRÒN (múi giờ luôn lệch nguyên giờ). Trước đây mọi độ
+    lệch > 30 phút đều bị dịch, nên dữ liệu chỉ CŨ (gap thanh khoản đêm, thị trường mỏng)
+    cũng bị đẩy timestamp -> nến quá khứ biến thành "sau khi tạo lệnh" -> khớp ảo.
+    Ba nhánh xử lý:
+      - Lệch xấp xỉ giờ tròn  -> neo lại (lệch múi giờ thật)
+      - Lệch dương, không tròn -> dữ liệu chỉ CŨ, timestamp vốn đúng -> GIỮ NGUYÊN
+      - Lệch âm, không tròn    -> timestamp ở TƯƠNG LAI mà không rõ nguyên nhân -> trả
+        RỖNG (bỏ qua theo dõi lượt này) thay vì đoán; lượt sau dữ liệu tốt sẽ bù lại
     """
     dt = df_m5["datetime"]
     if dt.dt.tz is None:
         dt = dt.dt.tz_localize("UTC")
     now = datetime.now(timezone.utc)
-    last = dt.iloc[-1]
-    skew = now - last
-    # Nến cuối lệch quá 30 phút (cả 2 chiều) -> dữ liệu sai múi giờ, neo lại theo giờ thật.
-    # Chừa 30 phút đủ rộng cho trễ API/nến đang hình thành, đủ hẹp để bắt lệch múi (>=1h).
-    if abs(skew.total_seconds()) > 1800:
-        dt = dt + skew
-    mask = dt >= start_time_utc
+    skew = now - dt.iloc[-1]
+    skew_sec = skew.total_seconds()
+
+    if abs(skew_sec) >= 1800:
+        hours_off = round(skew_sec / 3600.0)
+        residual = abs(skew_sec - hours_off * 3600.0)
+        if abs(hours_off) >= 1 and residual <= 360:
+            print(f"⚠️ Dữ liệu lệch múi giờ ~{hours_off}h - tự neo lại theo giờ UTC thật")
+            dt = dt + skew
+        elif skew_sec < 0:
+            print(f"⚠️ Timestamp nến ở TƯƠNG LAI {abs(skew_sec)/60:.0f} phút không rõ nguyên "
+                  f"nhân -> bỏ qua theo dõi lượt này (an toàn hơn đoán)")
+            empty = df_m5.iloc[0:0].copy()
+            empty["datetime_utc"] = dt.iloc[0:0]
+            return empty
+        # else: lệch dương không tròn giờ = dữ liệu chỉ CŨ -> giữ nguyên timestamp (đúng)
+
+    mask = (dt > start_time_utc) if exclusive else (dt >= start_time_utc)
     out = df_m5.loc[mask].copy()
     out["datetime_utc"] = dt[mask]
     return out.reset_index(drop=True)
@@ -1615,14 +1634,23 @@ def update_signal_outcomes(log, df_m5, current_price):
             else:
                 order_kind = "limit"
 
-        # Mốc bắt đầu duyệt nến: lệnh đã khớp thì từ lúc khớp, chưa khớp thì từ lúc tạo
-        start_iso = rec.get("fill_time_iso", rec["time_iso"]) if status == "pending" else rec["time_iso"]
+        # Mốc bắt đầu duyệt nến: lệnh đã khớp thì từ lúc khớp, chưa khớp thì từ lúc tạo.
+        # Lệnh đã khớp ở lượt TRƯỚC (có fill_time_iso) -> dùng exclusive để LOẠI chính nến
+        # khớp: nó đã được chấm đúng (chỉ phần giá sau điểm khớp) ngay tại lượt nó khớp.
+        # Nếu đưa lại vào, nó được tính với TOÀN BỘ biên độ -> phần giá TRƯỚC điểm khớp
+        # bị tính thành chạm TP/SL -> thắng/thua ảo ở lượt chạy kế tiếp.
+        exclusive = False
+        if status == "pending" and rec.get("fill_time_iso"):
+            start_iso = rec["fill_time_iso"]
+            exclusive = True
+        else:
+            start_iso = rec["time_iso"]
         try:
             start_time = datetime.fromisoformat(start_iso)
         except Exception:
             start_time = rec_time
 
-        candles = _candles_since(df_m5, start_time)
+        candles = _candles_since(df_m5, start_time, exclusive=exclusive)
 
         filled = (status == "pending")
         fill_this_candle = False
