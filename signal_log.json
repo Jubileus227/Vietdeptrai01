@@ -296,5 +296,33 @@
     "loc_max": 2,
     "cancel_level": 4081.76,
     "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-07-31T13:00:44.914356+00:00",
+    "direction": "BUY",
+    "entry": 4040.27257,
+    "sl": 4027.44,
+    "tp1": 4053.11,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4041.52452,
+    "order_kind": "limit",
+    "fingerprint": "H1:4034.0-4046.5:BUY",
+    "ctx_score": -3,
+    "ctx_votes": {
+      "Dow": -1,
+      "Ichimoku": 0,
+      "EMA": -1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 1,
+    "loc_max": 2,
+    "cancel_level": 4040.27,
+    "cancel_side": "below"
   }
 ]
