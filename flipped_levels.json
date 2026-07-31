@@ -1,26 +1,10 @@
 [
   {
-    "level": 4071.99,
-    "role": "resistance",
-    "tf": "M15",
-    "created_iso": "2026-07-28T06:00:42.537083+00:00",
-    "last_checked_iso": "2026-07-31T05:30:31.543490+00:00",
-    "touches": 0
-  },
-  {
     "level": 4035.84,
     "role": "support",
     "tf": "M15",
     "created_iso": "2026-07-28T22:15:12.204217+00:00",
-    "last_checked_iso": "2026-07-31T05:30:31.543490+00:00",
-    "touches": 0
-  },
-  {
-    "level": 4070.2,
-    "role": "resistance",
-    "tf": "M15",
-    "created_iso": "2026-07-30T03:00:40.600403+00:00",
-    "last_checked_iso": "2026-07-31T05:30:31.543490+00:00",
+    "last_checked_iso": "2026-07-31T05:36:27.630119+00:00",
     "touches": 0
   }
 ]
