@@ -4,7 +4,15 @@
     "role": "support",
     "tf": "M15",
     "created_iso": "2026-07-28T22:15:12.204217+00:00",
-    "last_checked_iso": "2026-07-31T11:55:24.196603+00:00",
+    "last_checked_iso": "2026-07-31T12:00:49.003926+00:00",
+    "touches": 0
+  },
+  {
+    "level": 4062.79,
+    "role": "resistance",
+    "tf": "H1",
+    "created_iso": "2026-07-31T12:00:49.058663+00:00",
+    "last_checked_iso": "2026-07-31T12:00:49.058673+00:00",
     "touches": 0
   }
 ]
