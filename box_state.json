@@ -3,19 +3,26 @@
   "box_low": 4042.61991,
   "box_mid": 4043.06403,
   "color": "green",
-  "direction": "BUY",
-  "alignment": "spring",
+  "direction": "SELL",
+  "alignment": "thuận",
   "confirm_dir": "down",
   "entries": [
     {
-      "label": "spring",
+      "label": "low",
       "price": 4042.61991
+    },
+    {
+      "label": "mid",
+      "price": 4043.06403
+    },
+    {
+      "label": "high",
+      "price": 4043.50815
     }
   ],
   "tf": "M15",
-  "state": "spring_ready",
-  "fingerprint": "M15:4042.6-4043.5:BUY:SPRING",
-  "confirmed_at_iso": "2026-08-02T21:50:27.903965+00:00",
-  "retest_tol": 0.195,
-  "sweep_extreme": 4042.20057
+  "state": "ready",
+  "fingerprint": "M15:4042.6-4043.5:SELL",
+  "confirmed_at_iso": "2026-08-02T21:55:35.999791+00:00",
+  "retest_tol": 0.195
 }
