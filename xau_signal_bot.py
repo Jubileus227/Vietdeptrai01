@@ -554,6 +554,10 @@ def find_box_state(df, atr_series, lookback=BOX_LOOKBACK, range_mult=BOX_RANGE_A
 # âm cài sẵn). Chuẩn mới: TP1 = 1R tối thiểu, TP2 = 1.8R, TP3 = 2.8R - thắng 1 lệnh đủ bù
 # 1 lệnh thua ngay từ TP1.
 BOX_RR_MULTIPLES = (1.0, 1.8, 2.8)   # TP1/TP2/TP3 theo bội số R
+RR_MIN_TP2 = 1.3          # A1: sau khi co tường, TP2 phải còn >= 1.3R - nếu tường đổi vai/cản
+                          # kéo TP2 về quá sát entry thì R:R đã hỏng, setup không đáng vào
+RR_MIN_WALL_CLEARANCE = 1.5  # A2: khoảng entry -> tường gần nhất (theo R) phải >= 1.5R, nếu
+                          # không thì về bản chất không có chỗ cho giá chạy tới TP -> bỏ qua
 BOX_SL_BUFFER_ATR = 0.3              # đệm SL ngoài mức cấu trúc = 0.3x ATR khung của box
 BOX_SL_MIN_POINTS = 5.0              # SL cấu trúc quá sát (nhiễu quét dễ) -> nới ra tối thiểu 5 giá
 BOX_SL_MAX_POINTS = 25.0             # SL cấu trúc quá rộng -> BỎ QUA entry đó (không ép SL, không vào lệnh xấu)
@@ -1360,6 +1364,80 @@ def save_signal_log(log):
 
 
 # ============================================================
+# 2b. PHÂN LOẠI CHẾ ĐỘ THỊ TRƯỜNG (MARKET REGIME)
+# ============================================================
+# Chuỗi thua 0/7 khớp đúng chẩn đoán "phương pháp breakout yếu trong thị trường range".
+# Bộ phân loại này nói cho bạn biết thị trường đang TREND hay RANGE, để biết nên nghiêng
+# về nhánh nào (Box breakout hợp trend; Fade 2 đầu hợp range). GIAI ĐOẠN ĐẦU CHỈ GHI NHÃN
+# + LOG regime vào mỗi lệnh, KHÔNG tự tắt nhánh nào - sau 30-50 lệnh thống kê sẽ cho biết
+# Box-trong-range có thật sự tệ hơn Box-trong-trend không, rồi mới trao quyền chặn.
+#
+# Hai tín hiệu độc lập:
+# 1. BIÊN ĐỘ (ATR hiện tại so với ATR trung bình dài hạn): giãn = trend, co = range
+# 2. CẤU TRÚC (Dow H1: có HH+HL / LH+LL rõ ràng không): có hướng = trend, đi ngang = range
+REGIME_ATR_EXPAND = 1.15   # ATR ngắn hạn / ATR dài hạn >= 1.15 -> biên độ đang GIÃN (trend)
+REGIME_ATR_CONTRACT = 0.85 # <= 0.85 -> biên độ CO (range); giữa 2 mức = trung tính
+
+
+def classify_regime(df_h1, dow_trend):
+    """
+    Trả về dict {"label": "TREND"/"RANGE"/"CHUYỂN TIẾP", "atr_ratio": float, "note": str}.
+    - BIÊN ĐỘ: ATR H1 gần đây (14 nến) so với ATR H1 dài hạn (~5 ngày = 120 nến H1)
+    - CẤU TRÚC: dow_trend "up"/"down" = có hướng; None = đi ngang
+    Đồng thuận cả 2 -> nhãn rõ; mâu thuẫn -> CHUYỂN TIẾP (thận trọng).
+    """
+    if df_h1 is None or len(df_h1) < 130:
+        return {"label": "CHUYỂN TIẾP", "atr_ratio": None,
+                "note": "chưa đủ dữ liệu H1 để phân loại"}
+    atr_series = atr(df_h1)
+    atr_short = float(atr_series.iloc[-14:].mean())
+    atr_long = float(atr_series.iloc[-120:].mean())
+    ratio = atr_short / atr_long if atr_long > 0 else 1.0
+
+    vol_trend = ratio >= REGIME_ATR_EXPAND    # biên độ giãn
+    vol_range = ratio <= REGIME_ATR_CONTRACT  # biên độ co
+    has_structure = dow_trend in ("up", "down")
+
+    # Đồng thuận: biên độ giãn + có cấu trúc = TREND; biên độ co + không cấu trúc = RANGE
+    if vol_trend and has_structure:
+        label = "TREND"
+    elif vol_range and not has_structure:
+        label = "RANGE"
+    elif not vol_trend and not vol_range and not has_structure:
+        label = "RANGE"        # biên độ trung tính + đi ngang -> nghiêng range
+    elif vol_trend or has_structure:
+        label = "TREND" if has_structure else "CHUYỂN TIẾP"
+    else:
+        label = "CHUYỂN TIẾP"
+
+    dir_txt = {"up": "tăng", "down": "giảm", None: "đi ngang"}.get(dow_trend, "đi ngang")
+    vol_txt = "giãn" if vol_trend else ("co" if vol_range else "trung tính")
+    return {"label": label, "atr_ratio": round(ratio, 2),
+            "note": f"biên độ {vol_txt} ({ratio:.2f}x) · cấu trúc {dir_txt}"}
+
+
+def regime_setup_hint(regime_label, box_signal):
+    """
+    Gợi ý (CHỈ hiển thị, không chặn) box hiện tại có HỢP chế độ thị trường không:
+    - RANGE + Box breakout (không phải fade/spring) -> cảnh báo "breakout dễ thất bại trong range"
+    - TREND + Fade 2 đầu -> cảnh báo "fade ngược trend rủi ro hơn"
+    Trả về chuỗi ghi chú hoặc None.
+    """
+    if not box_signal or not regime_label:
+        return None
+    state = box_signal.get("state", "")
+    alignment = box_signal.get("alignment")
+    is_breakout = state in ("ready", "waiting_retest") and alignment not in ("spring",)
+    is_fade = state == "unconfirmed" and box_signal.get("in_middle")
+
+    if regime_label == "RANGE" and is_breakout:
+        return "⚖️ Chế độ RANGE - breakout dễ thất bại (unfresh levels), ưu tiên fade 2 biên"
+    if regime_label == "TREND" and is_fade:
+        return "⚖️ Chế độ TREND - fade ngược dễ bị cuốn, ưu tiên đi theo breakout"
+    return None
+
+
+# ============================================================
 # 2c. SỔ ĐĂNG KÝ MỨC ĐỔI VAI (POLARITY FLIP REGISTRY)
 # ============================================================
 # Nguyên lý đổi vai: cạnh box bị phá vỡ KHÔNG mất giá trị - kháng cự vỡ thành hỗ trợ,
@@ -1522,6 +1600,20 @@ def apply_flip_walls(entry_dict, levels, atr_m5):
                     entry_dict[tp_key] = new_tp
                     notes.append(f"🧱 {tp_key.upper()} co về {new_tp:.2f} - trước mức đổi vai {wall:.2f}")
                 break  # chỉ xét tường GẦN NHẤT chắn TP này
+
+    # A1: ĐÁNH GIÁ R:R SAU KHI CO TƯỜNG. R = khoảng SL. Nếu TP2 bị kéo về dưới RR_MIN_TP2,
+    # hoặc TP2 gần bằng TP3 (chênh < 0.2R), tường đã giết R:R -> gắn cờ rr_broken để tầng
+    # trên xử lý. Sửa lỗi trong ảnh: TP2=TP3=4061.83 do cùng bị tường 4062.79 kéo về.
+    r = abs(entry - entry_dict["sl"]) if entry_dict.get("sl") is not None else None
+    if r and r > 0:
+        tp2_r = abs(entry_dict["tp2"] - entry) / r
+        tp3_r = abs(entry_dict["tp3"] - entry) / r
+        if tp2_r < RR_MIN_TP2:
+            entry_dict["rr_broken"] = True
+            notes.append(f"\U0001F6AB R:R hỏng: TP2 chỉ còn {tp2_r:.1f}R (< {RR_MIN_TP2}R) do tường chắn")
+        elif abs(tp3_r - tp2_r) < 0.2:
+            entry_dict["rr_broken"] = True
+            notes.append(f"\U0001F6AB R:R hỏng: TP2≈TP3 ({tp2_r:.1f}R) - tường nuốt dư địa, không đáng vào")
     return notes
 
 
@@ -1887,6 +1979,8 @@ def append_signal(log, sig):
         # Điểm VỊ TRÍ entry (Premium/Discount + FVG) - so sánh ĐẸP vs XẤU sau 30-50 lệnh
         "loc_score": sig["loc"]["score"] if sig.get("loc") else None,
         "loc_max": sig["loc"]["max"] if sig.get("loc") else None,
+        # Nhãn chế độ thị trường lúc phát lệnh - để so sánh win rate theo regime sau này
+        "regime": sig["regime"]["label"] if sig.get("regime") else None,
         # Mức vô hiệu hóa tiền đề: lệnh chờ tự HỦY khi giá đóng cửa vượt qua mức này
         # (box thường = đường giữa box; spring = đáy/đỉnh cú quét)
         "cancel_level": sig.get("cancel_level"),
@@ -2672,6 +2766,33 @@ def entry_location_grade(entry, direction, fib, fvgs_by_tf, atr_m5):
     return {"score": score, "max": mx, "label": label, "checks": checks}
 
 
+def compare_regime_win_rate(log):
+    """
+    So sánh win rate Box breakout theo CHẾ ĐỘ thị trường - câu trả lời bằng dữ liệu cho
+    "breakout có thật sự tệ trong RANGE không". Trả về chuỗi hoặc None nếu chưa đủ mẫu.
+    Chỉ tính lệnh mode box/box_h4 đã đóng có nhãn regime.
+    """
+    closed = [r for r in log if r.get("status") in ("win", "loss")
+              and r.get("mode") in ("box", "box_h4") and r.get("regime")]
+    if not closed:
+        return None
+
+    def _grp(records):
+        if not records:
+            return "0"
+        w = sum(1 for r in records if r["status"] == "win")
+        return f"{w}W/{len(records) - w}L ({round(w / len(records) * 100)}%)"
+
+    trend = [r for r in closed if r["regime"] == "TREND"]
+    rng = [r for r in closed if r["regime"] == "RANGE"]
+    parts = []
+    if trend:
+        parts.append(f"TREND {_grp(trend)}")
+    if rng:
+        parts.append(f"RANGE {_grp(rng)}")
+    return " | ".join(parts) if parts else None
+
+
 def compare_loc_win_rate(log):
     """
     So sánh win rate nhóm vị trí ĐẸP (đủ điểm) vs XẤU (0 điểm) trên các lệnh đã đóng -
@@ -2993,6 +3114,12 @@ def generate_signal(active_zone_directions=None):
     if box_signal:
         box_signal["dow_trend"] = dow_trend
 
+    # PHÂN LOẠI CHẾ ĐỘ THỊ TRƯỜNG (regime): TREND/RANGE/CHUYỂN TIẾP - chỉ ghi nhãn + log,
+    # chưa chặn nhánh nào. Dùng để đọc thống kê "Box-trong-range vs Box-trong-trend" sau này.
+    regime = classify_regime(df_h1, dow_trend)
+    if box_signal:
+        box_signal["regime_hint"] = regime_setup_hint(regime["label"], box_signal)
+
     # Ichimoku Kumo (mây) H1 - tương tự Dow, chỉ cảnh báo khi mâu thuẫn ở mức MẠNH NHẤT
     # (giá trên mây xanh / dưới mây đỏ) - các trường hợp "mới hình thành"/"trong mây" chưa đủ
     # rõ ràng để coi là mâu thuẫn thật sự, không hạ độ tin cậy vì lý do đó.
@@ -3121,6 +3248,7 @@ def generate_signal(active_zone_directions=None):
         "liquidity_note": liquidity_note,
         "news_warning": news_warning,
         "block_reason": block_reason,
+        "regime": regime,
         "fib": fib,
         "fib_note": None,
         "signal_mode": signal_mode,
@@ -3174,6 +3302,38 @@ def generate_signal(active_zone_directions=None):
             result["block_reason"] = ("Chưa có nến từ chối M15 tại vùng entry "
                                        "(REQUIRE_REJECTION_CANDLE đang bật) - chờ xác nhận")
             return result
+
+        # A1: R:R HỎNG do tường chắn -> KHÔNG PHÁT LỆNH (theo lựa chọn: R:R hỏng thì không
+        # đáng vào). apply_flip_walls đã gắn cờ rr_broken lên entry khi TP2 bị kéo về < 1.3R
+        # hoặc TP2≈TP3. Đây chính là lỗi trong ảnh: box H4 với TP2=TP3 do tường 4062.79.
+        if primary.get("rr_broken"):
+            result["direction"] = None
+            result["block_reason"] = (f"R:R hỏng - tường đổi vai/cản kéo TP2 quá sát entry "
+                                       f"({primary['entry']:.2f}), không đủ dư địa lợi nhuận, không phát lệnh")
+            return result
+
+        # A2: KHOẢNG TỚI TƯỜNG GẦN NHẤT quá hẹp so với rủi ro -> không có chỗ cho giá chạy
+        # tới TP. Nếu tường gần nhất (cùng loại chắn TP) cách entry < RR_MIN_WALL_CLEARANCE
+        # lần R thì bỏ qua ngay từ đầu (bổ sung cho A1: bắt cả ca chưa co TP nhưng vốn đã chật).
+        r_dist = abs(primary["entry"] - primary["sl"])
+        if r_dist > 0 and flip_levels:
+            direction = primary["direction"]
+            if direction == "SELL":
+                walls_ahead = [lv["level"] for lv in flip_levels
+                               if lv["role"] == "support" and lv["level"] < primary["entry"]]
+                nearest = max(walls_ahead) if walls_ahead else None
+            else:
+                walls_ahead = [lv["level"] for lv in flip_levels
+                               if lv["role"] == "resistance" and lv["level"] > primary["entry"]]
+                nearest = min(walls_ahead) if walls_ahead else None
+            if nearest is not None:
+                clearance_r = abs(nearest - primary["entry"]) / r_dist
+                if clearance_r < RR_MIN_WALL_CLEARANCE:
+                    result["direction"] = None
+                    result["block_reason"] = (f"Tường đổi vai {nearest:.2f} chỉ cách entry "
+                                               f"{clearance_r:.1f}R (< {RR_MIN_WALL_CLEARANCE}R) - "
+                                               f"không đủ chỗ cho giá chạy tới TP, không phát lệnh")
+                    return result
 
         # Mức HỦY LỆNH CHỜ (tiền đề chết): box thường = đường giữa box (ngược hướng lệnh);
         # spring = đáy/đỉnh cú quét (thủng = phá giả hóa ra phá thật).
@@ -3249,6 +3409,10 @@ def format_message(sig, win_stats=None, active_trades=None):
     ctx = box.get("ctx") if box else None
     if ctx:
         arrow_line += f" · 💪 {ctx['score']:+d} {_esc(ctx['label'])}"
+    regime = sig.get("regime")
+    if regime and regime.get("label"):
+        regime_icon = {"TREND": "📈", "RANGE": "🔁", "CHUYỂN TIẾP": "🔀"}.get(regime["label"], "")
+        arrow_line += f" · {regime_icon} {_esc(regime['label'])}"
     if arrow_line:
         lines.append(arrow_line)
     lines.append("")
@@ -3389,6 +3553,8 @@ def format_message(sig, win_stats=None, active_trades=None):
         for rej in box.get("rejected_entries", []) or []:
             lines.append(f"🚫 {_esc(rej['label'])} bị loại: {_esc(rej['reason'])}")
 
+        if box.get("regime_hint"):
+            lines.append(_esc(box["regime_hint"]))
         if sig.get("chase_warning"):
             lines.append(f"⚖️ {_esc(sig['chase_warning'])}")
         if sig.get("confidence") == "low":
@@ -3434,6 +3600,8 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"💪 {_esc(win_stats['ctx_compare'])}")
         if win_stats.get("loc_compare"):
             lines.append(f"🎯 {_esc(win_stats['loc_compare'])}")
+        if win_stats.get("regime_compare"):
+            lines.append(f"📈 Box theo chế độ: {_esc(win_stats['regime_compare'])}")
 
     def _fmt_zone(z):
         tags = "+".join(z["sources"])
@@ -3598,6 +3766,7 @@ if __name__ == "__main__":
             "fade": compute_win_rate(log, mode="fade"),
             "ctx_compare": compare_ctx_win_rate(log),
             "loc_compare": compare_loc_win_rate(log),
+            "regime_compare": compare_regime_win_rate(log),
         }
 
         message = format_message(signal, win_stats=win_stats, active_trades=active_trades)
