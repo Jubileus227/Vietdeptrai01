@@ -16,6 +16,6 @@
   "state": "spring_ready",
   "fingerprint": "M15:4053.1-4069.3:BUY:SPRING",
   "confirmed_at_iso": "2026-08-04T01:50:27.367953+00:00",
-  "retest_tol": 1.526,
+  "retest_tol": 1.498,
   "sweep_extreme": 4042.61423
 }
