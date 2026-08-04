@@ -3384,40 +3384,88 @@ def _esc(s):
 
 def format_message(sig, win_stats=None, active_trades=None):
     """
-    Bố cục MỚI tối ưu cho màn hình điện thoại dọc (mỗi dòng <= ~34 ký tự, không bị Telegram
-    bẻ dòng vô duyên), dùng HTML bold để tạo PHÂN CẤP thị giác:
-    - LỆNH CHÍNH (entry gần giá nhất - đúng lệnh được log) nổi bật, in đậm, đủ E/SL/TP1-3
-    - Các entry còn lại nén thành "Thang phụ" 1 dòng/entry (E · SL · TP1)
-    - Tên lệnh chuẩn: Sell Limit / Buy Stop... thay cho "CHỜ GIÁ VƯỢT QUA" dài dòng
-    - Ghi chú phụ (phiên, chống trùng...) nén thành footer 1 dòng
+    Bố cục 3 TẦNG "đảo ngược kim tự tháp" - đọc từ trên xuống theo thứ tự cần biết:
+    - TẦNG 1: giá + chế độ thị trường (1 dòng)
+    - TẦNG 2: HÀNH ĐỘNG (in đậm) - trả lời ngay "có nên làm gì?": lệnh mới / chờ / không
+    - TẦNG 3: lệnh ĐANG CHẠY + CHỜ KHỚP - tiền thật, luôn ở vị trí thứ 2
+    - Dưới vạch "CHI TIẾT": box, điểm bối cảnh, Ichimoku, zones... cho ai muốn đào sâu
+    Dùng HTML bold tạo phân cấp; mỗi dòng <= ~40 ký tự tránh Telegram bẻ dòng.
     """
     lines = []
 
-    # ---------- Dòng 1-2: giá + mũi tên đa khung (nén) + điểm bối cảnh ----------
+    # ═══════ TẦNG 1: DÒNG GIÁ + CHẾ ĐỘ THỊ TRƯỜNG (gọn) ═══════
     price_line = f"⚡ XAU {sig['price']:.2f}"
     if sig["pct_change"] is not None:
         price_line += f" ({sig['pct_change']:+.2f}%)"
     price_line += f" · {sig['time']}"
-    lines.append(price_line)
-
-    arrows = sig.get("trend_arrows")
-    arrow_line = ""
-    if arrows:
-        sym = lambda t: "↑" if t == "up" else ("↓" if t == "down" else "–")
-        arrow_line = " ".join(f"{tf}{sym(t)}" for tf, t in arrows.items())
-    box = sig.get("box_signal")
-    ctx = box.get("ctx") if box else None
-    if ctx:
-        arrow_line += f" · 💪 {ctx['score']:+d} {_esc(ctx['label'])}"
     regime = sig.get("regime")
     if regime and regime.get("label"):
-        regime_icon = {"TREND": "📈", "RANGE": "🔁", "CHUYỂN TIẾP": "🔀"}.get(regime["label"], "")
-        arrow_line += f" · {regime_icon} {_esc(regime['label'])}"
-    if arrow_line:
-        lines.append(arrow_line)
+        # Đổi "CHUYỂN TIẾP" -> "CHƯA RÕ" cho đúng bản chất (2 tín hiệu mâu thuẫn, không
+        # phải sideway). RANGE mới là sideway thật.
+        regime_disp = {"TREND": "📈 TREND", "RANGE": "🔁 RANGE (sideway)",
+                       "CHUYỂN TIẾP": "🔀 CHƯA RÕ"}.get(regime["label"], regime["label"])
+        price_line += f" · {regime_disp}"
+    lines.append(price_line)
     lines.append("")
 
-    # ---------- Khối box ----------
+    box = sig.get("box_signal")
+
+    # ═══════ TẦNG 2: HÀNH ĐỘNG - trả lời ngay "có nên làm gì không?" ═══════
+    # Đây là dòng QUAN TRỌNG NHẤT, in đậm, luôn ở đầu. 3 trạng thái:
+    #  - Có lệnh mới (BUY/SELL tại giá X)
+    #  - Chờ giá về (lệnh chờ đã đặt, chưa khớp)
+    #  - Không có lệnh mới (kèm lý do ngắn)
+    action = None
+    if sig.get("direction") and sig.get("entry") is not None:
+        kind = "Buy" if sig["direction"] == "BUY" else "Sell"
+        conf_flag = " 🟡" if sig.get("confidence") == "low" else ""
+        action = f"▶️ <b>LỆNH MỚI: {kind} @ {sig['entry']:.2f}</b>{conf_flag}"
+    elif sig.get("block_reason"):
+        # Rút gọn lý do chặn thành 1 cụm ngắn gọn
+        br = sig["block_reason"]
+        if "R:R" in br or "Tường" in br:
+            short = "R:R không đủ"
+        elif "ngoài tầm với" in br or "cách giá" in br:
+            short = "giá quá xa entry"
+        elif "nến từ chối" in br:
+            short = "chờ nến xác nhận"
+        elif "đứng yên" in br or "nghỉ lễ" in br:
+            short = "thị trường đứng yên"
+        elif "Chưa tìm thấy" in br:
+            short = "chưa có setup"
+        else:
+            short = None
+        if box and box.get("state") in ("waiting_retest", "spring_waiting"):
+            action = "▶️ <b>Chờ giá về test biên</b> (chưa vào lệnh)"
+        elif short:
+            action = f"▶️ <b>Không có lệnh mới</b> — {short}"
+        else:
+            action = "▶️ <b>Không có lệnh mới</b>"
+    else:
+        action = "▶️ <b>Không có lệnh mới</b>"
+    lines.append(action)
+
+    # ═══════ TẦNG 3: LỆNH ĐANG CHẠY / CHỜ KHỚP - tiền thật, luôn ở vị trí thứ 2 ═══════
+    if active_trades and active_trades.get("running"):
+        for t in active_trades["running"]:
+            lines.append(f"✅ {_esc(t)}")
+    if active_trades and active_trades.get("waiting"):
+        for t in active_trades["waiting"]:
+            lines.append(f"⏳ {_esc(t)}")
+    lines.append("")
+    lines.append("━━━━━━━ CHI TIẾT ━━━━━━━")
+
+    # ---------- Khối box (đã dời xuống phần Chi tiết) ----------
+    # Mũi tên đa khung + điểm bối cảnh: chẩn đoán, đặt ở đầu phần chi tiết
+    arrows = sig.get("trend_arrows")
+    if arrows:
+        sym = lambda t: "↑" if t == "up" else ("↓" if t == "down" else "–")
+        diag = " ".join(f"{tf}{sym(t)}" for tf, t in arrows.items())
+        ctx0 = box.get("ctx") if box else None
+        if ctx0:
+            diag += f" · 💪 {ctx0['score']:+d} {_esc(ctx0['label'])}"
+        lines.append(diag)
+
     if box:
         d_icon = {"BUY": "🟢", "SELL": "🔴"}.get(box.get("direction"), "📦")
         if sig.get("confidence") == "low" and sig.get("direction"):
@@ -3457,8 +3505,6 @@ def format_message(sig, win_stats=None, active_trades=None):
                         "strong_bear": "☁️ dưới mây (mạnh)", "new_bear": "☁️ dưới mây (mới)",
                         "unclear": "☁️ trong mây"}[ichi["strength"]]
             ctx_bits.append(ichi_txt)
-        if ctx:
-            ctx_bits.append(_esc(ctx["icon_line"]))
         if ctx_bits:
             lines.append(" · ".join(ctx_bits))
 
@@ -3563,18 +3609,6 @@ def format_message(sig, win_stats=None, active_trades=None):
         lines.append("")
     else:
         lines.append(f"⚪ {_esc(sig['block_reason'] if sig['block_reason'] else 'Chưa tìm thấy box nào để theo dõi')}")
-        lines.append("")
-
-    # ---------- Lệnh đang chờ khớp / đang chạy ----------
-    if active_trades and active_trades.get("waiting"):
-        lines.append("<b>⏳ CHỜ KHỚP</b>")
-        for t in active_trades["waiting"]:
-            lines.append(_esc(t))
-    if active_trades and active_trades.get("running"):
-        lines.append("<b>✅ ĐANG CHẠY</b>")
-        for t in active_trades["running"]:
-            lines.append(_esc(t))
-    if active_trades and (active_trades.get("waiting") or active_trades.get("running")):
         lines.append("")
 
     # ---------- Thống kê + vùng theo dõi (nén) ----------
