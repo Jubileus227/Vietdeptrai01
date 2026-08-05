@@ -151,7 +151,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 4177.67399,
     "order_kind": "limit",
