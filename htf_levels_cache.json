@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-09T21:00:34.256908+00:00",
+  "updated_at": "2026-08-09T22:00:36.328184+00:00",
   "h1_levels": [
     {
       "price": 3996.32338,
@@ -70,18 +70,6 @@
       "type": "high"
     },
     {
-      "price": 4342.55321,
-      "type": "high"
-    },
-    {
-      "price": 4342.46337,
-      "type": "high"
-    },
-    {
-      "price": 4342.46336,
-      "type": "high"
-    },
-    {
       "price": 4342.1624,
       "type": "low"
     },
@@ -100,74 +88,6 @@
     {
       "price": 4342.1624,
       "type": "low"
-    },
-    {
-      "price": 4342.45771,
-      "type": "high"
-    },
-    {
-      "price": 4342.45771,
-      "type": "high"
-    },
-    {
-      "price": 4342.45771,
-      "type": "high"
-    },
-    {
-      "price": 4342.45771,
-      "type": "high"
-    },
-    {
-      "price": 4342.4577,
-      "type": "high"
-    },
-    {
-      "price": 4342.4577,
-      "type": "high"
-    },
-    {
-      "price": 4342.4577,
-      "type": "high"
-    },
-    {
-      "price": 4342.45582,
-      "type": "high"
-    },
-    {
-      "price": 4342.45582,
-      "type": "high"
-    },
-    {
-      "price": 4342.45582,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
-    },
-    {
-      "price": 4342.45581,
-      "type": "high"
     }
   ],
   "h4_levels": [
@@ -232,6 +152,6 @@
       "type": "low"
     }
   ],
-  "atr_h1": 0.359,
-  "atr_h4": 7.564
+  "atr_h1": 0.629,
+  "atr_h4": 6.874
 }
