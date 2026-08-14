@@ -719,5 +719,34 @@
     "regime": "TREND",
     "cancel_level": 4342.65,
     "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-08-14T01:00:37.446095+00:00",
+    "direction": "BUY",
+    "entry": 4339.739004999999,
+    "sl": 4323.95,
+    "tp1": 4355.53,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4340.38305,
+    "order_kind": "limit",
+    "fingerprint": "H1:4331.3-4348.2:BUY",
+    "ctx_score": -3,
+    "ctx_votes": {
+      "Dow": -1,
+      "Ichimoku": 0,
+      "EMA": -1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 1,
+    "loc_max": 2,
+    "regime": "TREND",
+    "cancel_level": 4339.74,
+    "cancel_side": "below"
   }
 ]
