@@ -690,5 +690,34 @@
     "outcome_candle_iso": "2026-08-12T05:31:00+00:00",
     "outcome_time_iso": "2026-08-12T05:35:28.302516+00:00",
     "usd": 120.34
+  },
+  {
+    "time_iso": "2026-08-14T00:55:27.343066+00:00",
+    "direction": "SELL",
+    "entry": 4342.64724,
+    "sl": 4356.48,
+    "tp1": 4328.81,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4334.91281,
+    "order_kind": "limit",
+    "fingerprint": "H1:4335.0-4350.3:SELL",
+    "ctx_score": 2,
+    "ctx_votes": {
+      "Dow": 1,
+      "Ichimoku": 0,
+      "EMA": 1,
+      "MACD": 1,
+      "RSI": -1
+    },
+    "loc_score": 0,
+    "loc_max": 2,
+    "regime": "TREND",
+    "cancel_level": 4342.65,
+    "cancel_side": "above"
   }
 ]
