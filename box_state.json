@@ -17,8 +17,8 @@
     }
   ],
   "tf": "H1",
-  "state": "ready",
+  "state": "waiting_retest",
   "fingerprint": "H1:4368.3-4400.6:BUY",
   "confirmed_at_iso": "2026-08-17T13:55:28.866506+00:00",
-  "retest_tol": 3.724
+  "retest_tol": 4.512
 }
