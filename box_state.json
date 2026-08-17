@@ -1,21 +1,28 @@
 {
-  "box_high": 4385.78783,
-  "box_low": 4377.32545,
-  "box_mid": 4381.556640000001,
-  "color": "green",
+  "box_high": 4386.15729,
+  "box_low": 4367.39807,
+  "box_mid": 4376.77768,
+  "color": "red",
   "direction": "BUY",
-  "alignment": "spring",
-  "confirm_dir": "down",
+  "alignment": "thuận",
+  "confirm_dir": "up",
   "entries": [
     {
-      "label": "spring",
-      "price": 4377.32545
+      "label": "high",
+      "price": 4386.15729
+    },
+    {
+      "label": "mid",
+      "price": 4376.77768
+    },
+    {
+      "label": "low",
+      "price": 4367.39807
     }
   ],
-  "tf": "M15",
-  "state": "spring_ready",
-  "fingerprint": "M15:4377.3-4385.8:BUY:SPRING",
-  "confirmed_at_iso": "2026-08-17T05:20:31.067984+00:00",
-  "retest_tol": 1.876,
-  "sweep_extreme": 4367.39807
+  "tf": "H4",
+  "state": "ready",
+  "fingerprint": "H4:4367.4-4386.2:BUY",
+  "confirmed_at_iso": "2026-08-17T05:25:25.276236+00:00",
+  "retest_tol": 3.937
 }
