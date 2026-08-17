@@ -796,7 +796,7 @@
     "mode": "box_h4",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 4373.31068,
     "order_kind": "limit",
