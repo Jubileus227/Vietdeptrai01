@@ -814,5 +814,34 @@
     "regime": "RANGE",
     "cancel_level": 4359.37,
     "cancel_side": "below"
+  },
+  {
+    "time_iso": "2026-08-17T06:45:27.520809+00:00",
+    "direction": "BUY",
+    "entry": 4392.40406,
+    "sl": 4381.75,
+    "tp1": 4403.06,
+    "score": 0,
+    "mode": "box",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4395.00392,
+    "order_kind": "limit",
+    "fingerprint": "H1:4392.4-4415.1:BUY:SPRING",
+    "ctx_score": 1,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": 1,
+      "EMA": 1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 0,
+    "loc_max": 2,
+    "regime": "RANGE",
+    "cancel_level": 4386.04,
+    "cancel_side": "below"
   }
 ]
