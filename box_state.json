@@ -19,6 +19,6 @@
   "tf": "M15",
   "state": "ready",
   "fingerprint": "M15:4385.4-4414.6:BUY",
-  "confirmed_at_iso": "2026-08-18T11:40:32.075460+00:00",
-  "retest_tol": 1.659
+  "confirmed_at_iso": "2026-08-18T11:45:27.201706+00:00",
+  "retest_tol": 1.592
 }
