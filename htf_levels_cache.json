@@ -1,10 +1,6 @@
 {
-  "updated_at": "2026-08-21T20:25:41.123866+00:00",
+  "updated_at": "2026-08-23T21:00:32.782597+00:00",
   "h1_levels": [
-    {
-      "price": 4313.50559,
-      "type": "low"
-    },
     {
       "price": 4311.90719,
       "type": "low"
@@ -39,6 +35,94 @@
     },
     {
       "price": 4631.91226,
+      "type": "high"
+    },
+    {
+      "price": 4602.74522,
+      "type": "low"
+    },
+    {
+      "price": 4608.39801,
+      "type": "high"
+    },
+    {
+      "price": 4608.39585,
+      "type": "high"
+    },
+    {
+      "price": 4608.39462,
+      "type": "high"
+    },
+    {
+      "price": 4608.38548,
+      "type": "high"
+    },
+    {
+      "price": 4608.38547,
+      "type": "high"
+    },
+    {
+      "price": 4608.38547,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.38757,
+      "type": "high"
+    },
+    {
+      "price": 4608.39924,
       "type": "high"
     }
   ],
@@ -102,8 +186,24 @@
     {
       "price": 4451.3688,
       "type": "low"
+    },
+    {
+      "price": 4631.91226,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
+    },
+    {
+      "price": 4608.38758,
+      "type": "high"
     }
   ],
-  "atr_h1": 17.789,
-  "atr_h4": 38.871
+  "atr_h1": 0.892,
+  "atr_h4": 8.326
 }
