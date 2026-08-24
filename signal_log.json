@@ -1076,5 +1076,34 @@
     "cancel_level": 4400.0,
     "cancel_side": "below",
     "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4400.00 - tiền đề setup không còn, hủy lệnh chờ"
+  },
+  {
+    "time_iso": "2026-08-24T01:00:33.306125+00:00",
+    "direction": "SELL",
+    "entry": 4624.70518,
+    "sl": 4647.01,
+    "tp1": 4602.4,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4616.5515,
+    "order_kind": "limit",
+    "fingerprint": "M15:4608.4-4624.7:SELL:SPRING",
+    "ctx_score": -3,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": -1,
+      "EMA": -1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 1,
+    "loc_max": 2,
+    "regime": "RANGE",
+    "cancel_level": 4642.85,
+    "cancel_side": "above"
   }
 ]
