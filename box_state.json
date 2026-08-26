@@ -15,7 +15,7 @@
   "tf": "M15",
   "state": "spring_ready",
   "fingerprint": "M15:4606.7-4626.0:SELL:SPRING",
-  "confirmed_at_iso": "2026-08-26T19:00:53.265575+00:00",
+  "confirmed_at_iso": "2026-08-26T19:05:36.708589+00:00",
   "retest_tol": 2.245,
   "sweep_extreme": 4632.20308
 }
