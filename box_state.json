@@ -1,28 +1,28 @@
 {
-  "box_high": 4442.80031,
-  "box_low": 4400.09589,
-  "box_mid": 4421.4481,
-  "color": "red",
-  "direction": "BUY",
+  "box_high": 4442.27267,
+  "box_low": 4426.98541,
+  "box_mid": 4434.62904,
+  "color": "green",
+  "direction": "SELL",
   "alignment": "thuận",
-  "confirm_dir": "up",
+  "confirm_dir": "down",
   "entries": [
     {
-      "label": "high",
-      "price": 4442.80031
+      "label": "low",
+      "price": 4426.98541
     },
     {
       "label": "mid",
-      "price": 4421.4481
+      "price": 4434.62904
     },
     {
-      "label": "low",
-      "price": 4400.09589
+      "label": "high",
+      "price": 4442.27267
     }
   ],
-  "tf": "H1",
-  "state": "ready",
-  "fingerprint": "H1:4400.1-4442.8:BUY",
-  "confirmed_at_iso": "2026-09-01T08:10:35.730986+00:00",
-  "retest_tol": 4.732
+  "tf": "M15",
+  "state": "waiting_retest",
+  "fingerprint": "M15:4427.0-4442.3:SELL",
+  "confirmed_at_iso": "2026-09-01T08:15:41.485066+00:00",
+  "retest_tol": 3.355
 }
