@@ -1666,5 +1666,41 @@
     "outcome_candle_iso": "2026-09-02T13:27:00+00:00",
     "outcome_time_iso": "2026-09-02T13:30:46.386563+00:00",
     "usd": 123.87
+  },
+  {
+    "time_iso": "2026-09-02T16:01:12.991934+00:00",
+    "direction": "SELL",
+    "entry": 4382.20762,
+    "sl": 4394.21,
+    "tp1": 4370.21,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4372.99855,
+    "order_kind": "limit",
+    "fingerprint": "H1:4370.7-4382.2:FADE:SELL",
+    "cancel_level": 4394.21,
+    "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-09-02T16:01:12.991934+00:00",
+    "direction": "BUY",
+    "entry": 4370.70222,
+    "sl": 4358.7,
+    "tp1": 4382.7,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4372.99855,
+    "order_kind": "limit",
+    "fingerprint": "H1:4370.7-4382.2:FADE:BUY",
+    "cancel_level": 4358.7,
+    "cancel_side": "below"
   }
 ]
