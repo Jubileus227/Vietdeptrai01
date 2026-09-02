@@ -1677,7 +1677,7 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 4372.99855,
     "order_kind": "limit",
