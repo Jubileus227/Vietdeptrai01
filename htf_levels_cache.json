@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-06T21:00:41.982045+00:00",
+  "updated_at": "2026-09-06T22:05:26.544292+00:00",
   "h1_levels": [
     {
       "price": 4673.71074,
@@ -62,52 +62,24 @@
       "type": "low"
     },
     {
-      "price": 4429.14833,
-      "type": "high"
-    },
-    {
-      "price": 4429.14987,
-      "type": "high"
-    },
-    {
       "price": 4428.8699,
       "type": "low"
-    },
-    {
-      "price": 4429.14833,
-      "type": "high"
     },
     {
       "price": 4428.87685,
       "type": "low"
     },
     {
-      "price": 4429.15029,
-      "type": "high"
-    },
-    {
-      "price": 4429.15029,
-      "type": "high"
-    },
-    {
-      "price": 4429.15029,
-      "type": "high"
-    },
-    {
       "price": 4428.88463,
       "type": "low"
     },
     {
-      "price": 4429.15029,
-      "type": "high"
+      "price": 4428.88462,
+      "type": "low"
     },
     {
-      "price": 4429.15029,
-      "type": "high"
-    },
-    {
-      "price": 4429.15029,
-      "type": "high"
+      "price": 4428.88462,
+      "type": "low"
     },
     {
       "price": 4428.88462,
@@ -118,92 +90,32 @@
       "type": "low"
     },
     {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
       "price": 4428.88462,
       "type": "low"
     },
     {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
       "price": 4428.88462,
       "type": "low"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4428.88462,
-      "type": "low"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4428.88462,
-      "type": "low"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
     },
     {
       "price": 4428.88461,
       "type": "low"
     },
     {
-      "price": 4429.15028,
-      "type": "high"
+      "price": 4428.88461,
+      "type": "low"
     },
     {
       "price": 4428.88461,
       "type": "low"
     },
     {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
       "price": 4428.88461,
       "type": "low"
     },
     {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
       "price": 4428.88461,
       "type": "low"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4428.88461,
-      "type": "low"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
-    },
-    {
-      "price": 4429.15028,
-      "type": "high"
     },
     {
       "price": 4428.8846,
@@ -218,31 +130,19 @@
       "type": "low"
     },
     {
-      "price": 4429.15027,
-      "type": "high"
+      "price": 4428.8846,
+      "type": "low"
     },
     {
       "price": 4428.8846,
       "type": "low"
     },
     {
-      "price": 4429.15027,
-      "type": "high"
-    },
-    {
-      "price": 4428.8846,
-      "type": "low"
-    },
-    {
-      "price": 4429.15027,
+      "price": 4430.07132,
       "type": "high"
     }
   ],
   "h4_levels": [
-    {
-      "price": 4224.22648,
-      "type": "low"
-    },
     {
       "price": 4230.24215,
       "type": "low"
@@ -300,6 +200,6 @@
       "type": "high"
     }
   ],
-  "atr_h1": 0.409,
-  "atr_h4": 9.072
+  "atr_h1": 0.436,
+  "atr_h4": 9.345
 }
