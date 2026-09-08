@@ -2377,7 +2377,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 4396.42442,
     "order_kind": "limit",
