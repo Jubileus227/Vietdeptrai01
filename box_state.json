@@ -16,9 +16,9 @@
       "price": 4397.62905
     }
   ],
-  "tf": "M15",
+  "tf": "H1",
   "state": "ready",
-  "fingerprint": "M15:4397.6-4414.8:BUY",
-  "confirmed_at_iso": "2026-09-08T09:55:28.490840+00:00",
-  "retest_tol": 2.328
+  "fingerprint": "H1:4397.6-4414.8:BUY",
+  "confirmed_at_iso": "2026-09-08T10:00:50.707967+00:00",
+  "retest_tol": 4.44
 }
