@@ -2208,7 +2208,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4430.451,
     "order_kind": "limit",
@@ -2226,7 +2226,10 @@
     "regime": "TREND",
     "cancel_level": 4420.0,
     "cancel_side": "below",
-    "fill_time_iso": "2026-09-08T05:34:00+00:00"
+    "fill_time_iso": "2026-09-08T05:34:00+00:00",
+    "outcome_candle_iso": "2026-09-08T06:19:00+00:00",
+    "outcome_time_iso": "2026-09-08T06:20:32.697650+00:00",
+    "usd": -64.7
   },
   {
     "time_iso": "2026-09-08T06:15:33.819935+00:00",
@@ -2238,7 +2241,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "cancelled",
     "timeout_hours": 4,
     "signal_price": 4411.61152,
     "order_kind": "stop",
@@ -2255,6 +2258,7 @@
     "loc_max": 2,
     "regime": "RANGE",
     "cancel_level": 4412.38,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4412.38 - tiền đề setup không còn, hủy lệnh chờ"
   }
 ]
