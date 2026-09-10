@@ -1,7 +1,7 @@
 {
-  "box_high": 4421.68759,
-  "box_low": 4406.57196,
-  "box_mid": 4414.129774999999,
+  "box_high": 4415.98587,
+  "box_low": 4391.3649,
+  "box_mid": 4403.6753850000005,
   "color": "red",
   "direction": "SELL",
   "alignment": "spring",
@@ -9,13 +9,13 @@
   "entries": [
     {
       "label": "spring",
-      "price": 4421.68759
+      "price": 4415.98587
     }
   ],
   "tf": "H1",
-  "state": "spring_waiting",
-  "fingerprint": "H1:4406.6-4421.7:SELL:SPRING",
-  "confirmed_at_iso": "2026-09-10T12:02:11.763377+00:00",
+  "state": "spring_ready",
+  "fingerprint": "H1:4391.4-4416.0:SELL:SPRING",
+  "confirmed_at_iso": "2026-09-10T12:05:35.221453+00:00",
   "retest_tol": 5.243,
   "sweep_extreme": 4430.46387
 }
