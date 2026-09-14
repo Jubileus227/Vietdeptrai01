@@ -20,5 +20,5 @@
   "state": "ready",
   "fingerprint": "H1:4297.9-4311.6:BUY",
   "confirmed_at_iso": "2026-09-14T17:00:52.845164+00:00",
-  "retest_tol": 5.798
+  "retest_tol": 5.43
 }
