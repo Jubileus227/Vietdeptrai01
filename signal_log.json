@@ -2594,7 +2594,7 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 4284.90171,
     "order_kind": "limit",
@@ -2620,5 +2620,34 @@
     "cancel_level": 4286.66,
     "cancel_side": "below",
     "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4286.66 - tiền đề setup không còn, hủy lệnh chờ"
+  },
+  {
+    "time_iso": "2026-09-14T16:05:31.432926+00:00",
+    "direction": "SELL",
+    "entry": 4304.789225,
+    "sl": 4324.31,
+    "tp1": 4285.27,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4288.4333,
+    "order_kind": "limit",
+    "fingerprint": "H1:4297.9-4311.6:SELL",
+    "ctx_score": 2,
+    "ctx_votes": {
+      "Dow": 1,
+      "Ichimoku": 1,
+      "EMA": 1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 2,
+    "loc_max": 2,
+    "regime": "TREND",
+    "cancel_level": 4304.79,
+    "cancel_side": "above"
   }
 ]
