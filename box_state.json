@@ -2,7 +2,7 @@
   "box_high": 4346.31433,
   "box_low": 4330.87954,
   "box_mid": 4338.596935,
-  "color": "green",
+  "color": "red",
   "direction": "SELL",
   "alignment": "spring",
   "confirm_dir": "up",
@@ -15,7 +15,7 @@
   "tf": "M15",
   "state": "spring_waiting",
   "fingerprint": "M15:4330.9-4346.3:SELL:SPRING",
-  "confirmed_at_iso": "2026-09-14T04:40:31.598671+00:00",
-  "retest_tol": 2.173,
+  "confirmed_at_iso": "2026-09-14T04:45:32.163030+00:00",
+  "retest_tol": 2.175,
   "sweep_extreme": 4355.11149
 }
