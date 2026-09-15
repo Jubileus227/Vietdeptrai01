@@ -4,7 +4,7 @@
     "role": "resistance",
     "tf": "H4",
     "created_iso": "2026-09-14T12:05:26.375280+00:00",
-    "last_checked_iso": "2026-09-15T10:05:31.101395+00:00",
+    "last_checked_iso": "2026-09-15T10:10:35.025269+00:00",
     "touches": 0
   },
   {
@@ -12,7 +12,7 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-09-15T05:25:34.492673+00:00",
-    "last_checked_iso": "2026-09-15T10:05:31.101395+00:00",
+    "last_checked_iso": "2026-09-15T10:10:35.025269+00:00",
     "touches": 0
   }
 ]
