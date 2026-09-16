@@ -2794,7 +2794,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4338.92498,
     "order_kind": "limit",
@@ -2812,6 +2812,9 @@
     "regime": "TREND",
     "cancel_level": 4343.08,
     "cancel_side": "above",
-    "fill_time_iso": "2026-09-16T10:09:00+00:00"
+    "fill_time_iso": "2026-09-16T10:09:00+00:00",
+    "outcome_candle_iso": "2026-09-16T13:16:00+00:00",
+    "outcome_time_iso": "2026-09-16T13:20:32.740711+00:00",
+    "usd": -80.68
   }
 ]
