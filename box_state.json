@@ -1,0 +1,21 @@
+{
+  "box_high": 4323.30698,
+  "box_low": 4281.68471,
+  "box_mid": 4302.495845,
+  "color": "green",
+  "direction": "SELL",
+  "alignment": "spring",
+  "confirm_dir": "up",
+  "entries": [
+    {
+      "label": "spring",
+      "price": 4323.30698
+    }
+  ],
+  "tf": "H1",
+  "state": "spring_ready",
+  "fingerprint": "H1:4281.7-4323.3:SELL:SPRING",
+  "confirmed_at_iso": "2026-09-16T05:00:35.903779+00:00",
+  "retest_tol": 4.693,
+  "sweep_extreme": 4339.71271
+}
