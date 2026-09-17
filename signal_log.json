@@ -2827,13 +2827,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4269.9648,
     "order_kind": "limit",
     "fingerprint": "H4:4253.8-4299.1:FADE:SELL",
     "cancel_level": 4311.06,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-09-17T01:06:00+00:00"
   },
   {
     "time_iso": "2026-09-17T00:05:24.710496+00:00",
