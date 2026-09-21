@@ -16,9 +16,9 @@
       "price": 4382.31298
     }
   ],
-  "tf": "M15",
+  "tf": "H1",
   "state": "waiting_retest",
-  "fingerprint": "M15:4373.9-4382.3:SELL",
-  "confirmed_at_iso": "2026-09-20T23:15:34.287883+00:00",
-  "retest_tol": 0.834
+  "fingerprint": "H1:4373.9-4382.3:SELL",
+  "confirmed_at_iso": "2026-09-21T00:00:39.505704+00:00",
+  "retest_tol": 0.656
 }
