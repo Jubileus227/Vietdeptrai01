@@ -3269,14 +3269,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4288.92789,
     "order_kind": "limit",
     "fingerprint": "M15:4287.2-4294.2:FADE:SELL",
     "cancel_level": 4299.24,
     "cancel_side": "above",
-    "fill_time_iso": "2026-09-24T00:32:00+00:00"
+    "fill_time_iso": "2026-09-24T00:32:00+00:00",
+    "outcome_candle_iso": "2026-09-24T00:58:00+00:00",
+    "outcome_time_iso": "2026-09-24T01:00:48.561597+00:00",
+    "usd": -24.99
   },
   {
     "time_iso": "2026-09-23T22:30:41.223396+00:00",
