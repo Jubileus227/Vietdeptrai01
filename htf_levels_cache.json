@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-27T22:00:46.055488+00:00",
+  "updated_at": "2026-09-27T23:05:38.218060+00:00",
   "h1_levels": [
     {
       "price": 4238.36569,
@@ -68,94 +68,6 @@
     {
       "price": 4297.0096,
       "type": "high"
-    },
-    {
-      "price": 4284.85731,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07685,
-      "type": "low"
-    },
-    {
-      "price": 4286.07685,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07866,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
-    },
-    {
-      "price": 4286.07865,
-      "type": "low"
     }
   ],
   "h4_levels": [
@@ -240,18 +152,10 @@
       "type": "low"
     },
     {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
-    },
-    {
-      "price": 4286.07684,
-      "type": "low"
+      "price": 4286.33577,
+      "type": "high"
     }
   ],
-  "atr_h1": 0.647,
-  "atr_h4": 5.258
+  "atr_h1": 4.34,
+  "atr_h4": 8.81
 }
