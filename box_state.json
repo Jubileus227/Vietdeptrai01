@@ -23,6 +23,6 @@
   "tf": "H1",
   "state": "waiting_retest",
   "fingerprint": "H1:4165.5-4175.9:SELL",
-  "confirmed_at_iso": "2026-10-02T18:10:30.787744+00:00",
+  "confirmed_at_iso": "2026-10-02T18:15:27.881823+00:00",
   "retest_tol": 7.225
 }
