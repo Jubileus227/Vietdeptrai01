@@ -3836,7 +3836,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4142.82535,
     "order_kind": "limit",
@@ -3854,7 +3854,10 @@
     "regime": "RANGE",
     "cancel_level": 4147.27,
     "cancel_side": "below",
-    "fill_time_iso": "2026-10-05T03:01:00+00:00"
+    "fill_time_iso": "2026-10-05T03:01:00+00:00",
+    "outcome_candle_iso": "2026-10-05T04:15:00+00:00",
+    "outcome_time_iso": "2026-10-05T04:20:30.974995+00:00",
+    "usd": -33.16
   },
   {
     "time_iso": "2026-10-05T04:00:41.752817+00:00",
@@ -3866,7 +3869,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4144.70851,
     "order_kind": "limit",
@@ -3884,6 +3887,9 @@
     "regime": "RANGE",
     "cancel_level": 4136.35,
     "cancel_side": "below",
-    "fill_time_iso": "2026-10-05T04:04:00+00:00"
+    "fill_time_iso": "2026-10-05T04:04:00+00:00",
+    "outcome_candle_iso": "2026-10-05T04:16:00+00:00",
+    "outcome_time_iso": "2026-10-05T04:20:30.974995+00:00",
+    "usd": -37.76
   }
 ]
