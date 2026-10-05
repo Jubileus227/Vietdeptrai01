@@ -2,23 +2,20 @@
   "box_high": 4152.47903,
   "box_low": 4142.0624,
   "box_mid": 4147.270715000001,
-  "color": "green",
+  "color": "red",
   "direction": "BUY",
-  "alignment": "ngược",
-  "confirm_dir": "up",
+  "alignment": "spring",
+  "confirm_dir": "down",
   "entries": [
     {
-      "label": "mid",
-      "price": 4147.270715000001
-    },
-    {
-      "label": "low",
+      "label": "spring",
       "price": 4142.0624
     }
   ],
   "tf": "M15",
-  "state": "ready",
-  "fingerprint": "M15:4142.1-4152.5:BUY",
-  "confirmed_at_iso": "2026-10-05T03:55:27.767769+00:00",
-  "retest_tol": 1.903
+  "state": "spring_ready",
+  "fingerprint": "M15:4142.1-4152.5:BUY:SPRING",
+  "confirmed_at_iso": "2026-10-05T04:00:41.705817+00:00",
+  "retest_tol": 1.832,
+  "sweep_extreme": 4136.34544
 }
