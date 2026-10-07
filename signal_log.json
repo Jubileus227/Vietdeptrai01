@@ -4228,12 +4228,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4100.53054,
     "order_kind": "stop",
     "fingerprint": "H4:4107.8-4123.8:FADE:BUY",
     "cancel_level": 4095.79,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-10-07T20:18:00+00:00"
   }
 ]
