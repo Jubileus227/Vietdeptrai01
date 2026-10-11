@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-10-11T21:00:39.196228+00:00",
+  "updated_at": "2026-10-11T22:00:39.705471+00:00",
   "h1_levels": [
     {
       "price": 4220.14543,
@@ -54,92 +54,36 @@
       "type": "high"
     },
     {
-      "price": 4195.75593,
-      "type": "low"
-    },
-    {
-      "price": 4195.75593,
-      "type": "low"
-    },
-    {
       "price": 4196.00925,
       "type": "high"
-    },
-    {
-      "price": 4195.75593,
-      "type": "low"
     },
     {
       "price": 4196.00761,
       "type": "high"
     },
     {
-      "price": 4195.7313,
-      "type": "low"
-    },
-    {
       "price": 4196.00749,
       "type": "high"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
     },
     {
       "price": 4195.997,
       "type": "high"
     },
     {
-      "price": 4195.74537,
-      "type": "low"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
+      "price": 4195.99701,
+      "type": "high"
     },
     {
       "price": 4195.99701,
       "type": "high"
     },
     {
-      "price": 4195.74537,
-      "type": "low"
-    },
-    {
-      "price": 4195.99701,
-      "type": "high"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
-    },
-    {
       "price": 4195.99879,
       "type": "high"
     },
     {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
       "price": 4195.99879,
       "type": "high"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
     },
     {
       "price": 4195.99879,
@@ -150,28 +94,8 @@
       "type": "high"
     },
     {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
       "price": 4195.9988,
       "type": "high"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
     },
     {
       "price": 4195.9988,
@@ -182,36 +106,12 @@
       "type": "high"
     },
     {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
       "price": 4195.9988,
       "type": "high"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
     },
     {
       "price": 4195.99881,
       "type": "high"
-    },
-    {
-      "price": 4195.74713,
-      "type": "low"
-    },
-    {
-      "price": 4194.279,
-      "type": "low"
     }
   ],
   "h4_levels": [
@@ -282,16 +182,8 @@
     {
       "price": 4202.03378,
       "type": "high"
-    },
-    {
-      "price": 4195.7313,
-      "type": "low"
-    },
-    {
-      "price": 4195.74537,
-      "type": "low"
     }
   ],
-  "atr_h1": 0.465,
-  "atr_h4": 4.705
+  "atr_h1": 0.82,
+  "atr_h4": 5.042
 }
