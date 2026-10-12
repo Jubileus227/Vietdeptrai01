@@ -4394,5 +4394,34 @@
     "regime": "RANGE",
     "cancel_level": 4216.21,
     "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-10-12T13:00:43.582909+00:00",
+    "direction": "SELL",
+    "entry": 4165.62526,
+    "sl": 4177.42,
+    "tp1": 4153.83,
+    "score": 0,
+    "mode": "box_h4",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4164.585,
+    "order_kind": "limit",
+    "fingerprint": "H4:4126.1-4165.6:SELL",
+    "ctx_score": 2,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": 0,
+      "EMA": 1,
+      "MACD": 1,
+      "RSI": 0
+    },
+    "loc_score": 1,
+    "loc_max": 2,
+    "regime": "RANGE",
+    "cancel_level": 4145.86,
+    "cancel_side": "above"
   }
 ]
