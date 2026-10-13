@@ -4435,7 +4435,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4167.33783,
     "order_kind": "limit",
@@ -4452,6 +4452,7 @@
     "loc_max": 2,
     "regime": "CHUYỂN TIẾP",
     "cancel_level": 4171.21,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-10-13T01:13:00+00:00"
   }
 ]
