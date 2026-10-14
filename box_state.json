@@ -17,7 +17,7 @@
     }
   ],
   "tf": "H4",
-  "state": "ready",
+  "state": "waiting_retest",
   "fingerprint": "H4:4150.5-4165.6:BUY",
   "confirmed_at_iso": "2026-10-14T03:00:39.797527+00:00",
   "retest_tol": 5.154
