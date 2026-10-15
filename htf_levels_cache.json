@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-10-15T18:55:29.170420+00:00",
+  "updated_at": "2026-10-15T20:00:38.064805+00:00",
   "h1_levels": [
     {
       "price": 4061.73421,
@@ -18,18 +18,6 @@
       "type": "high"
     },
     {
-      "price": 4166.74854,
-      "type": "high"
-    },
-    {
-      "price": 4169.96789,
-      "type": "high"
-    },
-    {
-      "price": 4172.82699,
-      "type": "high"
-    },
-    {
       "price": 4080.21108,
       "type": "low"
     },
@@ -42,24 +30,16 @@
       "type": "low"
     },
     {
-      "price": 4164.02226,
-      "type": "high"
-    },
-    {
       "price": 4131.92959,
       "type": "low"
-    },
-    {
-      "price": 4160.36232,
-      "type": "high"
     },
     {
       "price": 4136.33355,
       "type": "low"
     },
     {
-      "price": 4168.92433,
-      "type": "high"
+      "price": 4144.04708,
+      "type": "low"
     }
   ],
   "h4_levels": [
@@ -124,22 +104,10 @@
       "type": "high"
     },
     {
-      "price": 4169.96789,
-      "type": "high"
-    },
-    {
-      "price": 4172.82699,
-      "type": "high"
-    },
-    {
       "price": 4073.81757,
       "type": "low"
-    },
-    {
-      "price": 4164.02226,
-      "type": "high"
     }
   ],
-  "atr_h1": 13.509,
-  "atr_h4": 26.252
+  "atr_h1": 13.337,
+  "atr_h4": 28.512
 }
