@@ -4614,7 +4614,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4170.87609,
     "order_kind": "limit",
@@ -4631,6 +4631,7 @@
     "loc_max": 2,
     "regime": "TREND",
     "cancel_level": 4169.87,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-10-16T15:58:00+00:00"
   }
 ]
