@@ -2542,6 +2542,70 @@ def finalize_watch_zones(clusters, current_price, atr_value, max_per_side=3):
 # box ghim được ưu tiên đánh giá lại (retest? vô hiệu?) và THAY THẾ box mới phát hiện
 # trên cùng khung - cho đến khi nó: đã ra lệnh (fingerprint có trong log) / bị vô hiệu
 # / hết hạn theo dõi. Chỉ khi đó box mới mới được lên sóng.
+# ============================================================
+# NHỊP PHÁT SETUP THEO NẾN ĐÓNG (bar-close gating)
+# ============================================================
+# Thay vì phát hiện box MỚI mỗi 5 phút (dễ nhấp nháy, entry dựa trên nến dở), bot chỉ
+# PHÁT SETUP MỚI đúng thời điểm nến khung tương ứng vừa đóng:
+#   - M15: phút chia hết 15 (0,15,30,45)
+#   - H1 : đầu giờ (phút 0)
+#   - H4 : mốc 0/4/8/12/16/20 UTC
+# Giữa các mốc, box ghim (box_state.json) lo phần theo dõi RETEST liên tục - đúng tinh
+# thần: BIÊN kẻ tại nến đóng (cố định), RETEST theo dõi realtime.
+#
+# Lịch cron không chạy đúng phút 00, hay trễ 1-2 phút -> dùng CỬA SỔ DUNG SAI: coi là
+# "nến vừa đóng" nếu đang trong BAR_CLOSE_TOLERANCE_MIN phút sau mốc. Và lưu "nến cuối đã
+# xử lý" của mỗi khung vào bar_gate.json để mỗi nến chỉ phát setup ĐÚNG MỘT LẦN (tránh
+# phát lại khi 2 lần chạy cùng rơi vào cửa sổ dung sai).
+BAR_GATE_PATH = "bar_gate.json"
+BAR_CLOSE_TOLERANCE_MIN = 6   # cửa sổ sau mốc nến đóng vẫn coi là "vừa đóng" (đủ rộng cho
+                              # cron trễ, đủ hẹp để không lấn sang nửa sau của nến M15)
+TF_MINUTES = {"M15": 15, "H1": 60, "H4": 240}
+
+
+def _last_closed_bar_start(tf, now_utc):
+    """Thời điểm BẮT ĐẦU của nến khung tf vừa đóng gần nhất (UTC, naive).
+    Vd H4 lúc 09:30 -> nến vừa đóng bắt đầu lúc 04:00 (đóng lúc 08:00)... thực ra nến
+    ĐANG hình thành bắt đầu 08:00; nến vừa ĐÓNG bắt đầu 04:00. Trả về mốc bắt đầu nến
+    đã đóng gần nhất = floor(now) về bội số khung, rồi lùi 1 khung."""
+    m = TF_MINUTES[tf]
+    total_min = now_utc.hour * 60 + now_utc.minute
+    floored = (total_min // m) * m  # mốc bắt đầu nến ĐANG hình thành
+    cur_bar_start = now_utc.replace(hour=floored // 60, minute=floored % 60,
+                                     second=0, microsecond=0)
+    return cur_bar_start - timedelta(minutes=m)  # nến vừa ĐÓNG = lùi 1 khung
+
+
+def bars_just_closed(now_utc=None):
+    """
+    Trả về set các khung {"M15","H1","H4"} có nến VỪA ĐÓNG trong cửa sổ dung sai VÀ chưa
+    được xử lý (so với bar_gate.json). Đồng thời cập nhật bar_gate.json đánh dấu đã xử lý.
+    Dùng để quyết khung nào được phát hiện box mới trong lượt chạy này.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        gate = json.load(open(BAR_GATE_PATH, encoding="utf-8")) if os.path.exists(BAR_GATE_PATH) else {}
+    except Exception:
+        gate = {}
+
+    opened = set()
+    for tf, m in TF_MINUTES.items():
+        total_min = now_utc.hour * 60 + now_utc.minute
+        mins_since_close = total_min % m  # số phút kể từ mốc nến vừa đóng (= mốc nến mới mở)
+        if mins_since_close <= BAR_CLOSE_TOLERANCE_MIN:
+            bar_start = _last_closed_bar_start(tf, now_utc)
+            key = bar_start.isoformat()
+            if gate.get(tf) != key:   # nến này CHƯA phát setup -> mở cổng + đánh dấu
+                opened.add(tf)
+                gate[tf] = key
+    try:
+        with open(BAR_GATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(gate, f, ensure_ascii=False)
+    except Exception:
+        pass
+    return opened
+
+
 BOX_STATE_PATH = "box_state.json"
 BOX_TRACK_MAX_HOURS = 24   # theo dõi retest tối đa 24h sau xác nhận (mức đổi vai dài hạn
                            # hơn đã có sổ flipped_levels lo, ghim chỉ phục vụ setup retest tươi)
@@ -3032,26 +3096,36 @@ def generate_signal(active_zone_directions=None):
     # Zone Setup/Thử nghiệm). Tìm box H1 TRƯỚC (cấu trúc lớn), sau đó ràng buộc box M15 phải
     # nằm LỌT trong phạm vi box H1 đã chọn - đúng cấu trúc "range nhỏ lồng trong range to".
     # Cả 2 đều tự loại bỏ box đã quá xa giá hiện tại (không còn liên quan để giao dịch).
+    # NHỊP NẾN ĐÓNG: chỉ PHÁT HIỆN BOX MỚI trên khung vừa đóng nến. Giữa các mốc, box mới
+    # = None và box ghim (tạo ở nến đóng trước) lo phần retest. atr_h4_series vẫn luôn tính
+    # để có atr_by_tf cho SL/retest-tol của box ghim H4.
+    opened = bars_just_closed()
+    bars_closed_list = sorted(opened)  # gộp vào result dict ở cuối hàm (hiển thị trong tin)
+
     atr_h1_series = atr(df_h1)
-    box_h1 = find_box_state(df_h1, atr_h1_series, live_price=current_price)
+    box_h1 = None
+    if "H1" in opened:
+        box_h1 = find_box_state(df_h1, atr_h1_series, live_price=current_price)
     box_m15 = None
-    if box_h1:
-        box_m15 = find_box_state(df_m15, atr_m15_series,
-                                  bound_range=(box_h1["box_low"], box_h1["box_high"]),
-                                  live_price=current_price)
-    else:
-        # không có box H1 thì M15 tìm tự do
-        box_m15 = find_box_state(df_m15, atr_m15_series, live_price=current_price)
+    if "M15" in opened:
+        if box_h1:
+            box_m15 = find_box_state(df_m15, atr_m15_series,
+                                      bound_range=(box_h1["box_low"], box_h1["box_high"]),
+                                      live_price=current_price)
+        else:
+            # không có box H1 (mới) thì M15 tìm tự do
+            box_m15 = find_box_state(df_m15, atr_m15_series, live_price=current_price)
 
     # ---- BOX H4 (setup swing): gộp từ nến H1 gốc, 0 credit; chỉ dùng nến H4 đủ 4 con
-    # đã đóng (resample_h1_to_h4 tự loại nến đang hình thành). Ngưỡng thanh khoản 1.8x. ----
+    # đã đóng. Chỉ phát hiện box H4 MỚI khi nến H4 vừa đóng. ----
     df_h4 = resample_h1_to_h4(df_h1)
     box_h4 = None
     atr_h4_series = None
     if df_h4 is not None and len(df_h4) >= 30:
         atr_h4_series = atr(df_h4)
-        box_h4 = find_box_state(df_h4, atr_h4_series, range_mult=BOX_RANGE_ATR_MULT_H4,
-                                 live_price=current_price)
+        if "H4" in opened:
+            box_h4 = find_box_state(df_h4, atr_h4_series, range_mult=BOX_RANGE_ATR_MULT_H4,
+                                     live_price=current_price)
 
     # ---- BOX GHIM: box đã xác nhận từ lần chạy trước được ƯU TIÊN, chống box mới cướp sóng ----
     pinned = load_pinned_box()
@@ -3249,6 +3323,7 @@ def generate_signal(active_zone_directions=None):
         "news_warning": news_warning,
         "block_reason": block_reason,
         "regime": regime,
+        "bars_closed": bars_closed_list,
         "fib": fib,
         "fib_note": None,
         "signal_mode": signal_mode,
@@ -3454,6 +3529,13 @@ def format_message(sig, win_stats=None, active_trades=None):
             lines.append(f"⏳ {_esc(t)}")
     lines.append("")
     lines.append("━━━━━━━ CHI TIẾT ━━━━━━━")
+
+    # Nhịp nến đóng: cho biết setup lần này sinh từ nến khung nào vừa đóng
+    bc = sig.get("bars_closed")
+    if bc:
+        lines.append(f"⏱ Nến vừa đóng: {', '.join(bc)} — quét setup mới")
+    else:
+        lines.append("⏱ Giữa nến — chỉ theo dõi lệnh, không quét setup mới")
 
     # ---------- Khối box (đã dời xuống phần Chi tiết) ----------
     # Mũi tên đa khung + điểm bối cảnh: chẩn đoán, đặt ở đầu phần chi tiết
