@@ -44,7 +44,7 @@ jobs:
         run: |
           git config user.name "xau-signal-bot"
           git config user.email "actions@github.com"
-          for f in signal_log.json flipped_levels.json box_state.json h1_native_cache.json htf_levels_cache.json; do
+          for f in signal_log.json flipped_levels.json box_state.json h1_native_cache.json htf_levels_cache.json bar_gate.json; do
             git add -A -- "$f" 2>/dev/null || true
           done
           git diff --cached --quiet || git commit -m "Cập nhật trạng thái bot [skip ci]"
