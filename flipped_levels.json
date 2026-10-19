@@ -4,15 +4,7 @@
     "role": "resistance",
     "tf": "M15",
     "created_iso": "2026-10-11T22:00:39.976364+00:00",
-    "last_checked_iso": "2026-10-19T23:10:33.774050+00:00",
-    "touches": 0
-  },
-  {
-    "level": 4142.39,
-    "role": "support",
-    "tf": "M15",
-    "created_iso": "2026-10-15T02:00:33.920599+00:00",
-    "last_checked_iso": "2026-10-19T23:10:33.774050+00:00",
+    "last_checked_iso": "2026-10-19T23:20:35.634657+00:00",
     "touches": 0
   },
   {
@@ -20,7 +12,7 @@
     "role": "resistance",
     "tf": "H4",
     "created_iso": "2026-10-19T00:00:41.702269+00:00",
-    "last_checked_iso": "2026-10-19T23:10:33.774050+00:00",
+    "last_checked_iso": "2026-10-19T23:20:35.634657+00:00",
     "touches": 0
   },
   {
@@ -28,7 +20,7 @@
     "role": "resistance",
     "tf": "M15",
     "created_iso": "2026-10-19T04:00:38.684786+00:00",
-    "last_checked_iso": "2026-10-19T23:10:33.774050+00:00",
+    "last_checked_iso": "2026-10-19T23:20:35.634657+00:00",
     "touches": 0
   },
   {
@@ -36,7 +28,15 @@
     "role": "resistance",
     "tf": "H1",
     "created_iso": "2026-10-19T15:00:43.154694+00:00",
-    "last_checked_iso": "2026-10-19T23:10:33.774050+00:00",
+    "last_checked_iso": "2026-10-19T23:20:35.634657+00:00",
+    "touches": 0
+  },
+  {
+    "level": 4137.19,
+    "role": "resistance",
+    "tf": "M15",
+    "created_iso": "2026-10-19T23:20:35.676805+00:00",
+    "last_checked_iso": "2026-10-19T23:20:35.676814+00:00",
     "touches": 0
   }
 ]
