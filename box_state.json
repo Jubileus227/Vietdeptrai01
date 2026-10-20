@@ -13,7 +13,7 @@
     }
   ],
   "tf": "M15",
-  "state": "spring_ready",
+  "state": "spring_waiting",
   "fingerprint": "M15:4137.2-4138.8:BUY:SPRING",
   "confirmed_at_iso": "2026-10-20T05:15:32.593408+00:00",
   "retest_tol": 1.561,
