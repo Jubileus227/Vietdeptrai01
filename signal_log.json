@@ -306,5 +306,34 @@
     "fingerprint": "M15:4113.2-4119.8:FADE:BUY",
     "cancel_level": 4108.2,
     "cancel_side": "below"
+  },
+  {
+    "time_iso": "2026-10-21T06:15:33.922336+00:00",
+    "direction": "SELL",
+    "entry": 4119.84338,
+    "sl": 4131.59,
+    "tp1": 4108.1,
+    "score": 0,
+    "mode": "box",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 4116.52121,
+    "order_kind": "limit",
+    "fingerprint": "M15:4113.2-4119.8:SELL:SPRING",
+    "ctx_score": 2,
+    "ctx_votes": {
+      "Dow": 1,
+      "Ichimoku": 1,
+      "EMA": 1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 0,
+    "loc_max": 2,
+    "regime": "TREND",
+    "cancel_level": 4129.5,
+    "cancel_side": "above"
   }
 ]
