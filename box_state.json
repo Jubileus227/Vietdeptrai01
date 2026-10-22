@@ -1,0 +1,21 @@
+{
+  "box_high": 4139.30971,
+  "box_low": 4115.19983,
+  "box_mid": 4127.25477,
+  "color": "red",
+  "direction": "SELL",
+  "alignment": "spring",
+  "confirm_dir": "up",
+  "entries": [
+    {
+      "label": "spring",
+      "price": 4139.30971
+    }
+  ],
+  "tf": "M15",
+  "state": "spring_ready",
+  "fingerprint": "M15:4115.2-4139.3:SELL:SPRING",
+  "confirmed_at_iso": "2026-10-22T02:15:28.851250+00:00",
+  "retest_tol": 1.661,
+  "sweep_extreme": 4142.67368
+}
