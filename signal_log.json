@@ -841,7 +841,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "cancelled",
     "timeout_hours": 4,
     "signal_price": 3998.91146,
     "order_kind": "limit",
@@ -858,6 +858,7 @@
     "loc_max": 2,
     "regime": "CHUYỂN TIẾP",
     "cancel_level": 4004.68,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4004.68 - tiền đề setup không còn, hủy lệnh chờ"
   }
 ]
