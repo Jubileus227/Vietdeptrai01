@@ -1069,13 +1069,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4002.3406,
     "order_kind": "limit",
     "fingerprint": "M15:3993.5-4003.7:FADE:SELL",
     "cancel_level": 4008.69,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-10-25T23:04:00+00:00"
   },
   {
     "time_iso": "2026-10-25T22:45:31.597646+00:00",
