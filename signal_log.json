@@ -1240,13 +1240,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3988.94387,
     "order_kind": "limit",
     "fingerprint": "M15:3990.5-3999.1:FADE:SELL",
     "cancel_level": 4004.95,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-10-26T01:16:00+00:00"
   },
   {
     "time_iso": "2026-10-26T00:30:38.807041+00:00",
@@ -1280,7 +1281,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3994.96136,
     "order_kind": "limit",
@@ -1297,6 +1298,7 @@
     "loc_max": 2,
     "regime": "RANGE",
     "cancel_level": 3995.65,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-10-26T01:16:00+00:00"
   }
 ]
