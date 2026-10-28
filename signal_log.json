@@ -1862,13 +1862,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4061.23026,
     "order_kind": "limit",
     "fingerprint": "M15:4062.1-4064.0:FADE:SELL",
     "cancel_level": 4069.05,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-10-28T00:40:00+00:00"
   },
   {
     "time_iso": "2026-10-28T00:30:36.330973+00:00",
