@@ -2362,14 +2362,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 3905.0306,
     "order_kind": "limit",
     "fingerprint": "M15:3893.0-3898.3:FADE:BUY",
     "cancel_level": 3887.5,
     "cancel_side": "below",
-    "fill_time_iso": "2026-11-02T02:57:00+00:00"
+    "fill_time_iso": "2026-11-02T02:57:00+00:00",
+    "outcome_candle_iso": "2026-11-02T03:03:00+00:00",
+    "outcome_time_iso": "2026-11-02T03:05:24.916986+00:00",
+    "usd": 27.6
   },
   {
     "time_iso": "2026-11-02T03:00:45.446661+00:00",
@@ -2399,12 +2402,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "cancelled",
     "timeout_hours": 4,
     "signal_price": 3895.5762,
     "order_kind": "stop",
     "fingerprint": "H1:3914.2-3915.0:FADE:BUY",
     "cancel_level": 3907.04,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 3907.04 - tiền đề setup không còn, hủy lệnh chờ"
   }
 ]
