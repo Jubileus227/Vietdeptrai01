@@ -2900,12 +2900,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4068.02914,
     "order_kind": "limit",
     "fingerprint": "H1:4061.9-4079.2:FADE:BUY",
     "cancel_level": 4049.9,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-06T17:03:00+00:00"
   }
 ]
