@@ -2922,13 +2922,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 4063.32727,
     "order_kind": "limit",
     "fingerprint": "H4:4061.9-4070.8:FADE:SELL",
     "cancel_level": 4082.81,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-11-08T23:00:00+00:00"
   },
   {
     "time_iso": "2026-11-06T20:00:35.256040+00:00",
@@ -2959,13 +2960,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 4067.32037,
     "order_kind": "limit",
     "fingerprint": "M15:4065.7-4069.3:FADE:SELL",
     "cancel_level": 4074.34,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-11-08T23:00:00+00:00",
+    "outcome_candle_iso": "2026-11-08T23:01:00+00:00",
+    "outcome_time_iso": "2026-11-08T23:05:35.329090+00:00",
+    "usd": 25.01
   },
   {
     "time_iso": "2026-11-08T22:45:25.153995+00:00",
@@ -2977,13 +2982,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4067.32037,
     "order_kind": "limit",
     "fingerprint": "M15:4065.7-4069.3:FADE:BUY",
     "cancel_level": 4060.7,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-08T23:01:00+00:00",
+    "outcome_candle_iso": "2026-11-08T23:02:00+00:00",
+    "outcome_time_iso": "2026-11-08T23:05:35.329090+00:00",
+    "usd": -25.01
   },
   {
     "time_iso": "2026-11-08T23:00:42.183070+00:00",
@@ -3013,12 +3022,16 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 4066.85482,
     "order_kind": "limit",
     "fingerprint": "H1:4065.7-4069.3:FADE:BUY",
     "cancel_level": 4060.7,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-08T23:01:00+00:00",
+    "outcome_candle_iso": "2026-11-08T23:02:00+00:00",
+    "outcome_time_iso": "2026-11-08T23:05:35.329090+00:00",
+    "usd": -25.01
   }
 ]
