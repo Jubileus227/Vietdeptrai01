@@ -3433,12 +3433,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "cancelled",
     "timeout_hours": 4,
     "signal_price": 4091.32329,
     "order_kind": "stop",
     "fingerprint": "M15:4109.4-4119.6:FADE:BUY",
     "cancel_level": 4102.6,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 4102.60 - tiền đề setup không còn, hủy lệnh chờ"
   }
 ]
