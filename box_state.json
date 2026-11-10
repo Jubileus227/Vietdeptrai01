@@ -17,7 +17,7 @@
     }
   ],
   "tf": "M15",
-  "state": "waiting_retest",
+  "state": "ready",
   "fingerprint": "M15:4120.3-4138.4:BUY",
   "confirmed_at_iso": "2026-11-10T01:30:40.340842+00:00",
   "retest_tol": 2.565
