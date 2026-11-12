@@ -3652,5 +3652,41 @@
     "regime": "CHUYỂN TIẾP",
     "cancel_level": 3989.82,
     "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-11-12T00:45:39.594826+00:00",
+    "direction": "SELL",
+    "entry": 3985.96939,
+    "sl": 3990.97,
+    "tp1": 3980.97,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 3987.51924,
+    "order_kind": "stop",
+    "fingerprint": "M15:3984.8-3986.0:FADE:SELL",
+    "cancel_level": 3990.97,
+    "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-11-12T00:45:39.594826+00:00",
+    "direction": "BUY",
+    "entry": 3984.75439,
+    "sl": 3979.75,
+    "tp1": 3989.76,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 3987.51924,
+    "order_kind": "limit",
+    "fingerprint": "M15:3984.8-3986.0:FADE:BUY",
+    "cancel_level": 3979.75,
+    "cancel_side": "below"
   }
 ]
