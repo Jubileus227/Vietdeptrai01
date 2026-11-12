@@ -3711,7 +3711,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 3988.91578,
     "order_kind": "limit",
@@ -3729,6 +3729,9 @@
     "regime": "CHUYỂN TIẾP",
     "cancel_level": 3985.36,
     "cancel_side": "below",
-    "fill_time_iso": "2026-11-12T01:46:00+00:00"
+    "fill_time_iso": "2026-11-12T01:46:00+00:00",
+    "outcome_candle_iso": "2026-11-12T01:54:00+00:00",
+    "outcome_time_iso": "2026-11-12T01:55:32.067207+00:00",
+    "usd": -36.45
   }
 ]
