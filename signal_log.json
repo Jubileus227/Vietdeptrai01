@@ -3817,13 +3817,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 3886.96675,
     "order_kind": "limit",
     "fingerprint": "M15:3879.5-3890.1:FADE:SELL",
     "cancel_level": 3895.13,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-11-13T00:49:00+00:00",
+    "outcome_candle_iso": "2026-11-13T00:54:00+00:00",
+    "outcome_time_iso": "2026-11-13T00:55:26.151917+00:00",
+    "usd": 24.97
   },
   {
     "time_iso": "2026-11-13T00:45:36.497549+00:00",
