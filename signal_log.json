@@ -3784,7 +3784,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 3883.5155,
     "order_kind": "limit",
@@ -3802,7 +3802,10 @@
     "regime": "CHUYỂN TIẾP",
     "cancel_level": 3881.59,
     "cancel_side": "below",
-    "fill_time_iso": "2026-11-13T00:34:00+00:00"
+    "fill_time_iso": "2026-11-13T00:34:00+00:00",
+    "outcome_candle_iso": "2026-11-13T00:45:00+00:00",
+    "outcome_time_iso": "2026-11-13T00:50:30.245964+00:00",
+    "usd": 30.03
   },
   {
     "time_iso": "2026-11-13T00:45:36.497549+00:00",
