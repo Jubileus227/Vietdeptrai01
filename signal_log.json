@@ -4058,7 +4058,7 @@
     "mode": "box",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "breakeven",
     "timeout_hours": 4,
     "signal_price": 3887.9315,
     "order_kind": "limit",
@@ -4077,7 +4077,10 @@
     "cancel_level": 3901.7,
     "cancel_side": "above",
     "fill_time_iso": "2026-11-13T17:51:00+00:00",
-    "be_moved": true
+    "be_moved": true,
+    "outcome_candle_iso": "2026-11-13T17:52:00+00:00",
+    "outcome_time_iso": "2026-11-13T19:35:28.421509+00:00",
+    "usd": 0.0
   },
   {
     "time_iso": "2026-11-13T19:30:35.960947+00:00",
