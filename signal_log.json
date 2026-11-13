@@ -3956,13 +3956,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 3887.12482,
     "order_kind": "limit",
     "fingerprint": "M15:3885.7-3892.3:FADE:BUY",
     "cancel_level": 3878.2,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-13T15:09:00+00:00",
+    "outcome_candle_iso": "2026-11-13T15:13:00+00:00",
+    "outcome_time_iso": "2026-11-13T15:15:28.445510+00:00",
+    "usd": 37.46
   },
   {
     "time_iso": "2026-11-13T14:45:40.797383+00:00",
@@ -3992,13 +3996,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "win",
     "timeout_hours": 4,
     "signal_price": 3896.68542,
     "order_kind": "limit",
     "fingerprint": "M15:3885.7-3905.0:FADE:BUY",
     "cancel_level": 3878.2,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-13T15:09:00+00:00",
+    "outcome_candle_iso": "2026-11-13T15:13:00+00:00",
+    "outcome_time_iso": "2026-11-13T15:15:28.445510+00:00",
+    "usd": 37.46
   },
   {
     "time_iso": "2026-11-13T15:00:44.961270+00:00",
@@ -4028,12 +4036,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3893.95284,
     "order_kind": "limit",
     "fingerprint": "H1:3885.0-3905.0:FADE:BUY",
     "cancel_level": 3873.0,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-13T15:09:00+00:00"
   }
 ]
