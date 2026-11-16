@@ -4609,7 +4609,7 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 3859.63056,
     "order_kind": "limit",
