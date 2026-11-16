@@ -4241,12 +4241,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3890.71496,
     "order_kind": "limit",
     "fingerprint": "M15:3888.1-3900.9:FADE:BUY",
     "cancel_level": 3883.13,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-16T00:30:00+00:00"
   }
 ]
