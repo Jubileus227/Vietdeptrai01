@@ -4370,5 +4370,41 @@
     "cancel_level": 3858.44,
     "cancel_side": "below",
     "cancel_reason": "Giá đóng cửa vượt qua mức vô hiệu hóa 3858.44 - tiền đề setup không còn, hủy lệnh chờ"
+  },
+  {
+    "time_iso": "2026-11-16T07:15:36.494030+00:00",
+    "direction": "SELL",
+    "entry": 3867.82708,
+    "sl": 3877.01,
+    "tp1": 3858.64,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 3855.51135,
+    "order_kind": "limit",
+    "fingerprint": "M15:3865.0-3867.8:FADE:SELL",
+    "cancel_level": 3877.01,
+    "cancel_side": "above"
+  },
+  {
+    "time_iso": "2026-11-16T07:15:36.494030+00:00",
+    "direction": "BUY",
+    "entry": 3865.03305,
+    "sl": 3855.85,
+    "tp1": 3874.22,
+    "score": 0,
+    "mode": "fade",
+    "confidence": "normal",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 3855.51135,
+    "order_kind": "stop",
+    "fingerprint": "M15:3865.0-3867.8:FADE:BUY",
+    "cancel_level": 3855.85,
+    "cancel_side": "below"
   }
 ]
