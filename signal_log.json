@@ -4158,7 +4158,7 @@
     "mode": "box",
     "confidence": "low",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 3882.16466,
     "order_kind": "limit",
@@ -4175,7 +4175,11 @@
     "loc_max": 2,
     "regime": "RANGE",
     "cancel_level": 3877.23,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-16T01:01:00+00:00",
+    "outcome_candle_iso": "2026-11-16T01:02:00+00:00",
+    "outcome_time_iso": "2026-11-16T01:05:25.442583+00:00",
+    "usd": -25.01
   },
   {
     "time_iso": "2026-11-16T00:00:42.615149+00:00",
