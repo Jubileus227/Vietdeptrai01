@@ -4267,7 +4267,7 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "expired",
     "timeout_hours": 4,
     "signal_price": 3867.09073,
     "order_kind": "limit",
@@ -4436,12 +4436,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3854.44221,
     "order_kind": "stop",
     "fingerprint": "H4:3864.0-3901.2:FADE:BUY",
     "cancel_level": 3851.99,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-16T09:03:00+00:00"
   }
 ]
