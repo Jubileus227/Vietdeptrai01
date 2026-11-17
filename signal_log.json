@@ -4712,12 +4712,13 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3869.05492,
     "order_kind": "limit",
     "fingerprint": "M15:3864.5-3870.4:FADE:BUY",
     "cancel_level": 3857.2,
-    "cancel_side": "below"
+    "cancel_side": "below",
+    "fill_time_iso": "2026-11-17T02:30:00+00:00"
   }
 ]
