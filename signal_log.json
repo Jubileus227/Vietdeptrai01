@@ -4851,13 +4851,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3870.42501,
     "order_kind": "stop",
     "fingerprint": "M15:3867.7-3870.4:FADE:SELL",
     "cancel_level": 3878.94,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-11-17T16:16:00+00:00"
   },
   {
     "time_iso": "2026-11-17T16:15:30.806410+00:00",
