@@ -5306,13 +5306,16 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 3553.8531,
     "order_kind": "limit",
     "fingerprint": "M15:3526.8-3556.5:FADE:BUY",
     "cancel_level": 3514.83,
     "cancel_side": "below",
-    "fill_time_iso": "2026-11-20T17:21:00+00:00"
+    "fill_time_iso": "2026-11-20T17:21:00+00:00",
+    "outcome_candle_iso": "2026-11-20T18:28:00+00:00",
+    "outcome_time_iso": "2026-11-20T18:30:34.960338+00:00",
+    "usd": -59.99
   }
 ]
