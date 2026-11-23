@@ -1,0 +1,24 @@
+{
+  "box_high": 3662.25057,
+  "box_low": 3620.95811,
+  "box_mid": 3641.60434,
+  "color": "red",
+  "direction": "SELL",
+  "alignment": "ngược",
+  "confirm_dir": "down",
+  "entries": [
+    {
+      "label": "mid",
+      "price": 3641.60434
+    },
+    {
+      "label": "high",
+      "price": 3662.25057
+    }
+  ],
+  "tf": "H1",
+  "state": "ready",
+  "fingerprint": "H1:3621.0-3662.3:SELL",
+  "confirmed_at_iso": "2026-11-23T14:00:43.483724+00:00",
+  "retest_tol": 5.707
+}

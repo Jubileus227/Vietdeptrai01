@@ -5622,5 +5622,34 @@
     "fingerprint": "H4:3568.9-3625.6:FADE:BUY",
     "cancel_level": 3556.89,
     "cancel_side": "below"
+  },
+  {
+    "time_iso": "2026-11-23T14:00:43.508166+00:00",
+    "direction": "SELL",
+    "entry": 3662.25057,
+    "sl": 3681.27,
+    "tp1": 3643.23,
+    "score": 0,
+    "mode": "box",
+    "confidence": "low",
+    "entry_type": "limit",
+    "status": "waiting_fill",
+    "timeout_hours": 4,
+    "signal_price": 3656.00119,
+    "order_kind": "limit",
+    "fingerprint": "H1:3621.0-3662.3:SELL",
+    "ctx_score": -2,
+    "ctx_votes": {
+      "Dow": 0,
+      "Ichimoku": 0,
+      "EMA": -1,
+      "MACD": -1,
+      "RSI": 0
+    },
+    "loc_score": 2,
+    "loc_max": 2,
+    "regime": "CHUYỂN TIẾP",
+    "cancel_level": 3641.6,
+    "cancel_side": "above"
   }
 ]
