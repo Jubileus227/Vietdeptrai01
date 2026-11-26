@@ -17,7 +17,7 @@
     }
   ],
   "tf": "H1",
-  "state": "ready",
+  "state": "waiting_retest",
   "fingerprint": "H1:3567.4-3586.3:SELL",
   "confirmed_at_iso": "2026-11-26T18:00:44.174414+00:00",
   "retest_tol": 4.423
