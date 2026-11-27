@@ -6011,14 +6011,17 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "pending",
+    "status": "loss",
     "timeout_hours": 4,
     "signal_price": 3632.90687,
     "order_kind": "limit",
     "fingerprint": "H1:3626.5-3634.9:FADE:SELL",
     "cancel_level": 3646.91,
     "cancel_side": "above",
-    "fill_time_iso": "2026-11-27T05:01:00+00:00"
+    "fill_time_iso": "2026-11-27T05:01:00+00:00",
+    "outcome_candle_iso": "2026-11-27T05:24:00+00:00",
+    "outcome_time_iso": "2026-11-27T05:25:29.713755+00:00",
+    "usd": -60.0
   },
   {
     "time_iso": "2026-11-27T05:00:42.521438+00:00",
