@@ -6011,13 +6011,14 @@
     "mode": "fade",
     "confidence": "normal",
     "entry_type": "limit",
-    "status": "waiting_fill",
+    "status": "pending",
     "timeout_hours": 4,
     "signal_price": 3632.90687,
     "order_kind": "limit",
     "fingerprint": "H1:3626.5-3634.9:FADE:SELL",
     "cancel_level": 3646.91,
-    "cancel_side": "above"
+    "cancel_side": "above",
+    "fill_time_iso": "2026-11-27T05:01:00+00:00"
   },
   {
     "time_iso": "2026-11-27T05:00:42.521438+00:00",
